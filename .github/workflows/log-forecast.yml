@@ -1,0 +1,56 @@
+name: Log carbon intensity forecast
+
+# 07:30 UTC is 07:30 GMT / 08:30 BST: comfortably before the 11:00 UK cutoff, even
+# allowing for GitHub's scheduled-run delays (often 5-30 min, occasionally more).
+on:
+  schedule:
+    - cron: "30 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: log-forecast
+  cancel-in-progress: false
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Snapshot forward forecast to CSV
+        run: uv run --python 3.12 carbon-charge log-forecast --out-dir "$RUNNER_TEMP/snapshot"
+
+      - name: Commit snapshot to the data branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
+            git fetch origin data
+            git worktree add "$RUNNER_TEMP/data" data
+            git -C "$RUNNER_TEMP/data" reset --hard origin/data
+          else
+            git worktree add --detach "$RUNNER_TEMP/data"
+            git -C "$RUNNER_TEMP/data" checkout --orphan data
+            git -C "$RUNNER_TEMP/data" rm -rf --quiet . || true
+          fi
+
+          year=$(date -u +%Y)
+          mkdir -p "$RUNNER_TEMP/data/ci_forecast/$year"
+          cp "$RUNNER_TEMP"/snapshot/ci_forecast_*.csv "$RUNNER_TEMP/data/ci_forecast/$year/"
+
+          cd "$RUNNER_TEMP/data"
+          git add ci_forecast
+          if git diff --cached --quiet; then
+            echo "Nothing new to commit."
+          else
+            git commit -m "Forecast snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push origin HEAD:data
+          fi
