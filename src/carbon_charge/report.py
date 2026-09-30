@@ -180,11 +180,14 @@ def render() -> str:
         f"{(pd.to_datetime(folds['test_end']) - pd.to_datetime(folds['test_start'])).dt.days.max() + 1} days, "
         "rolling origin). Every forecast for day D uses only data published before 11:00 UK time on D-1.\n",
         "## Headline: share of the timer-to-perfect-foresight gap captured\n",
+        "![Share of the possible saving captured by each forecast](figures/gap_captured.png)\n",
+        "![One typical night: forecast, outcome and the slots each plan charges in](figures/sample_night.png)\n",
         f"Default car: plug in 18:00, 8 kWh by 07:00, 7 kW charger, every night ({nights} nights). "
         "Emissions are priced at actual carbon intensity. 'Gap captured' = (timer − strategy) / (timer − perfect foresight), "
         "totalled over nights; the CI is a 7-night moving-block bootstrap.\n",
         _md(head), "",
         "## Forecast accuracy (MAE / RMSE, gCO2/kWh)\n",
+        "![Carbon forecast error by model](figures/carbon_accuracy.png)\n",
         "All models scored on exactly the same half-hours.\n",
         _md(o.rename(columns={"model": "Model", "n": "Half-hours", "mae": "MAE", "rmse": "RMSE"})), "",
         "### By season\n", _md(_pair(season, "season").rename(columns=names)), "",
@@ -278,6 +281,7 @@ def _render_layer2(read) -> list[str]:
         "so it is known when planning and is used as a feature and as the natural baseline. "
         "The LightGBM price model predicts the *basis* (realised minus day-ahead) and adds it back.\n",
         "## Price forecast accuracy (MAE / RMSE, GBP/MWh)\n",
+        "![Price forecast error by model](figures/price_accuracy.png)\n",
         "All models scored on exactly the same half-hours.\n",
         _md(overall), "",
         "### By season\n", _md(pair(ps, "season")), "",
@@ -291,6 +295,7 @@ def _render_layer2(read) -> list[str]:
         "with no network charges, levies or supplier margin. Negative prices count as negative cost.\n",
         _md(cost), "",
         "## Cost/carbon trade-off\n",
+        "![Cost and carbon per night as the carbon price rises](figures/cost_carbon_frontier.png)\n",
         "Each slot is ranked by `price/1000 + lam x carbon/1e6` (GBP/kWh), where lam is a carbon price in GBP per tonne. "
         "Cells show realised wholesale cost per night (GBP) / carbon per night (g). "
         "'Gap captured' is measured on that blended objective.\n",

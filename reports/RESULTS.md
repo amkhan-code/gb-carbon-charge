@@ -6,6 +6,10 @@ Out-of-sample period: **2025-01-01 to 2026-09-29** (46 folds, model refit every 
 
 ## Headline: share of the timer-to-perfect-foresight gap captured
 
+![Share of the possible saving captured by each forecast](figures/gap_captured.png)
+
+![One typical night: forecast, outcome and the slots each plan charges in](figures/sample_night.png)
+
 Default car: plug in 18:00, 8 kWh by 07:00, 7 kW charger, every night (631 nights). Emissions are priced at actual carbon intensity. 'Gap captured' = (timer − strategy) / (timer − perfect foresight), totalled over nights; the CI is a 7-night moving-block bootstrap.
 
 | Strategy | Nights | gCO2 per night | Saving vs timer (%) | Gap captured (95% CI) |
@@ -20,6 +24,8 @@ Default car: plug in 18:00, 8 kWh by 07:00, 7 kW charger, every night (631 night
 | Perfect foresight | 631 | 853.5 | 10.4 | 100% |
 
 ## Forecast accuracy (MAE / RMSE, gCO2/kWh)
+
+![Carbon forecast error by model](figures/carbon_accuracy.png)
 
 All models scored on exactly the same half-hours.
 
@@ -96,6 +102,8 @@ The price being forecast is the **realised Elexon Market Index (APX) price**, ha
 
 ## Price forecast accuracy (MAE / RMSE, GBP/MWh)
 
+![Price forecast error by model](figures/price_accuracy.png)
+
 All models scored on exactly the same half-hours.
 
 | Model | Half-hours | MAE | RMSE |
@@ -156,6 +164,8 @@ Default car (18:00, 8 kWh by 07:00, 7 kW). Cost is wholesale only: energy priced
 | Perfect foresight | 627 | 0.579 | 14.4 | 100% |
 
 ## Cost/carbon trade-off
+
+![Cost and carbon per night as the carbon price rises](figures/cost_carbon_frontier.png)
 
 Each slot is ranked by `price/1000 + lam x carbon/1e6` (GBP/kWh), where lam is a carbon price in GBP per tonne. Cells show realised wholesale cost per night (GBP) / carbon per night (g). 'Gap captured' is measured on that blended objective.
 

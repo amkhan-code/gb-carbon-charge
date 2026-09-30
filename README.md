@@ -26,6 +26,10 @@ slot-ranking accuracy, and a sensitivity set (plug-in 17:00-21:00, 4-20 kWh, not
 
 Full tables, with confidence intervals and sensitivity, are in [`reports/RESULTS.md`](reports/RESULTS.md).
 
+![Share of the possible saving captured by each forecast](reports/figures/gap_captured.png)
+
+![One typical night](reports/figures/sample_night.png)
+
 - **Carbon:** LightGBM's error is 19 gCO2/kWh MAE against 43 for same-period-yesterday. Charging with its forecast
   captures **34%** of the gap between an overnight timer and perfect foresight (40% with price features added).
   The absolute prize is small: perfect foresight saves 10% of emissions over the timer.
@@ -34,6 +38,8 @@ Full tables, with confidence intervals and sensitivity, are in [`reports/RESULTS
   day-ahead price directly** (12.22 vs 12.27). Cost-only charging captures about 55% of its gap either way.
 - **Trade-off:** planning on price alone cuts carbon about as much as planning on the carbon forecast, and blending
   a modest carbon price (about £250/t) into the objective costs almost nothing.
+
+![Cost and carbon per night as the carbon price rises](reports/figures/cost_carbon_frontier.png)
 
 ## How it avoids leaking the future
 

@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 
 from carbon_charge import config, db
+from carbon_charge import figures as figures_mod
 from carbon_charge import report as report_mod
 from carbon_charge.evaluation import backtest as backtest_mod
 from carbon_charge.ingest import carbon_intensity, demand_forecast, prices, weather
@@ -142,6 +143,8 @@ def report() -> None:
     """Run evaluate + optimise and write reports/RESULTS.md."""
     evaluate()
     optimise()
+    with db.connect(read_only=True) as con:
+        typer.echo(f"figures: {', '.join(figures_mod.make_all(con))}")
     path = config.REPORTS_DIR / "RESULTS.md"
     path.write_text(report_mod.render())
     typer.echo(f"wrote {path}")

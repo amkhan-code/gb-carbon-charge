@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from carbon_charge import config, report
+from carbon_charge import config, figures, report
 from carbon_charge.evaluation import backtest
 from carbon_charge.models import lgbm
 
@@ -51,3 +51,12 @@ def test_blend_frontier_and_render(reports):
     text = report.render()
     assert "# Layer 2: wholesale prices" in text and "Cost/carbon trade-off" in text
     assert "carbon only" in text
+
+
+def test_charts_are_written_and_embedded(con, reports):
+    names = figures.make_all(con)
+    assert {"gap_captured.png", "carbon_accuracy.png", "price_accuracy.png", "cost_carbon_frontier.png"} <= set(names)
+    for n in names:
+        assert (config.REPORTS_DIR / "figures" / n).stat().st_size > 5000
+    text = report.render()
+    assert "figures/gap_captured.png" in text and "figures/cost_carbon_frontier.png" in text
