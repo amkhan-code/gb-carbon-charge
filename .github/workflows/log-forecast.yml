@@ -16,12 +16,12 @@ concurrency:
 
 jobs:
   log:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
 
       - name: Snapshot forward forecast to CSV
         run: uv run --python 3.12 carbon-charge log-forecast --out-dir "$RUNNER_TEMP/snapshot"
