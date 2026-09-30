@@ -1,0 +1,21 @@
+# Everything runs through compose; data and reports persist on the host.
+#   docker compose run --rm app ingest all
+#   docker compose run --rm app backtest
+#   docker compose run --rm app report
+#   docker compose run --rm tests
+services:
+  app:
+    build: {context: ., target: app}
+    volumes:
+      - ./data:/data
+      - ./reports:/reports
+  tests:
+    build: {context: ., target: test}
+    profiles: ["test"]
+  # Daily forward-forecast snapshot to the local DuckDB (GitHub Actions does the same to the data branch).
+  log-forecast:
+    build: {context: ., target: app}
+    command: ["log-forecast"]
+    volumes:
+      - ./data:/data
+    profiles: ["logger"]

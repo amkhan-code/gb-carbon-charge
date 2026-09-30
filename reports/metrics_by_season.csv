@@ -1,0 +1,17 @@
+model,season,n,mae,rmse
+last_week,DJF,7152,62.89,77.9
+last_week,JJA,8832,42.69,54.56
+last_week,MAM,8820,52.39,65.63
+last_week,SON,5760,62.05,78.11
+lgbm,DJF,7152,18.36,23.18
+lgbm,JJA,8832,19.11,24.75
+lgbm,MAM,8820,18.7,23.81
+lgbm,SON,5760,21.0,27.61
+lgbm_noweather,DJF,7152,36.04,44.41
+lgbm_noweather,JJA,8832,26.67,33.36
+lgbm_noweather,MAM,8820,33.0,41.42
+lgbm_noweather,SON,5760,38.64,47.2
+yesterday,DJF,7152,47.42,60.78
+yesterday,JJA,8832,37.78,48.16
+yesterday,MAM,8820,44.74,57.09
+yesterday,SON,5760,45.22,58.99

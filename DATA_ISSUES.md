@@ -100,3 +100,26 @@ Source: "Day Ahead Half Hourly Demand Forecast Performance". Chosen because it h
   11:00 D-1 cutoff is roughly the period ending ~11:00 D-1 (allow for publication lag; to verify).
 - Demand forecast: one vintage per day, published ~08:45-09:45Z on D-1.
 - Weather: see WX-2.
+
+## Found while building Layer 1
+
+### X-2: "same period yesterday" cannot be a strict day-ahead baseline
+- At the 11:00 D-1 cutoff only D-1's early periods are published (with the 1 h actuals lag,
+  periods starting up to 09:30). About 58% of periods have no D-1 value available.
+- Handling: the baseline uses D-1 where published and falls back to the same period on D-2
+  otherwise (`models/baselines.py`). This is a deliberate reading of the spec, not a data
+  fault; a naive "D-1 regardless" baseline would leak and is not computed.
+
+### X-3: NESO forecast baseline has no history yet
+- Because of CI-1, the only valid NESO baseline is the logger's, which began 2026-09-30. The
+  first snapshots taken locally that day were issued after that day's cutoff, so they qualify
+  for no target day. `carbon-charge report` shows the NESO row once >= 14 nights are covered.
+
+### X-4: publication lags are assumptions
+- CI actuals: 1 h after period end. ECMWF runs: 8 h after (upper-bound) issue time. Neither
+  is published by the sources. Both are in `config.py`; results should be re-run if they change.
+
+### ENV-1: LightGBM needs the OpenMP runtime on macOS
+- `libomp` is normally installed with Homebrew, which is absent on the development machine. Local
+  runs borrowed the copy bundled in scikit-learn's wheel via DYLD_LIBRARY_PATH. Linux (Docker, CI)
+  installs `libgomp1` and is unaffected.

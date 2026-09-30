@@ -6,6 +6,8 @@ from pathlib import Path
 import typer
 
 from carbon_charge import config, db
+from carbon_charge import report as report_mod
+from carbon_charge.evaluation import backtest as backtest_mod
 from carbon_charge.ingest import carbon_intensity, demand_forecast, weather
 from carbon_charge.timeutils import UTC
 
@@ -78,6 +80,54 @@ def import_forecasts(csv_dir: Path = typer.Argument(..., help="Directory of snap
     """Load logger snapshot CSVs (a checkout of the data branch) into DuckDB."""
     with db.connect() as con:
         typer.echo(f"ci_forecast_log: {carbon_intensity.import_forecast_csvs(con, csv_dir)} rows")
+
+
+@app.command()
+def backtest(
+    start: str = typer.Option("2025-01-01", help="First target day of the test period."),
+    end: str = typer.Option(None, help="Last target day (default: last complete day with actuals)."),
+    refit_days: int = typer.Option(14, help="Refit the model every N days."),
+) -> None:
+    """Rolling-origin backtest; stores out-of-sample forecasts in DuckDB (backtest_forecast)."""
+    with db.connect() as con:
+        last = con.execute(
+            "SELECT max(settlement_date) FROM ci_history GROUP BY settlement_date "
+            "HAVING count(*) >= 46 ORDER BY 1 DESC LIMIT 1"
+        ).fetchone()[0]
+        end_d = date.fromisoformat(end) if end else last
+        forecasts, folds = backtest_mod.run(con, date.fromisoformat(start), end_d, refit_days)
+        typer.echo(f"{len(folds)} folds, {len(forecasts)} forecasts, {backtest_mod.save(con, forecasts)} saved")
+        config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        folds.to_csv(config.REPORTS_DIR / "backtest_folds.csv", index=False)
+
+
+@app.command()
+def evaluate() -> None:
+    """Error metrics (by season / time of day) and slot-ranking accuracy from stored backtest forecasts."""
+    with db.connect(read_only=True) as con:
+        tables = report_mod.evaluate(con)
+    report_mod.write_csvs(tables)
+    typer.echo(tables["overall"].to_string(index=False))
+
+
+@app.command()
+def optimise() -> None:
+    """Simulate the four charging strategies over the backtest period, incl. the sensitivity set."""
+    with db.connect(read_only=True) as con:
+        tables = report_mod.optimise(con)
+    report_mod.write_csvs(tables)
+    s = tables["optimiser_summary"]
+    typer.echo(s[s["scenario"] == "default"].round(2).to_string(index=False))
+
+
+@app.command()
+def report() -> None:
+    """Run evaluate + optimise and write reports/RESULTS.md."""
+    evaluate()
+    optimise()
+    path = config.REPORTS_DIR / "RESULTS.md"
+    path.write_text(report_mod.render())
+    typer.echo(f"wrote {path}")
 
 
 @app.command()

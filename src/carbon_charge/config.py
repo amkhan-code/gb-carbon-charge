@@ -54,3 +54,17 @@ WEATHER_LOCATIONS = (
     Location("london", 51.5, -0.1, "demand"),
     Location("manchester", 53.5, -2.2, "demand"),
 )
+
+
+# --- Availability assumptions (leakage rules) -------------------------------
+# A value is only usable once it has been PUBLISHED. These lags are assumptions,
+# chosen conservatively; see DATA_ISSUES.md (X-1, WX-2).
+# Carbon intensity actuals: available this long after the END of their period.
+CI_ACTUAL_LAG_MINUTES = 60
+# ECMWF IFS runs become available on Open-Meteo this long after initialisation.
+WEATHER_RUN_LAG_HOURS = 8
+# Only this lead is used for features: previous_day1 values for late target
+# hours come from runs published after the cutoff.
+WEATHER_FEATURE_LEAD_DAYS = 2
+
+REPORTS_DIR = Path(os.environ.get("CARBON_CHARGE_REPORTS_DIR", "reports"))

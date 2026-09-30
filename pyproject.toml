@@ -5,7 +5,9 @@ description = "Day-ahead GB carbon intensity forecasting for EV charge schedulin
 requires-python = ">=3.11"
 dependencies = [
     "duckdb>=1.0",
+    "holidays>=0.105",
     "httpx>=0.27",
+    "lightgbm>=4.7.0",
     "pandas>=2.2",
     "typer>=0.12",
 ]
@@ -14,7 +16,7 @@ dependencies = [
 carbon-charge = "carbon_charge.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "scipy>=1.11"]
 
 [build-system]
 requires = ["hatchling"]

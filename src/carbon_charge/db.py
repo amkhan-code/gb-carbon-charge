@@ -59,6 +59,14 @@ CREATE TABLE IF NOT EXISTS weather_forecast (
     fetched_at_utc TIMESTAMP NOT NULL,
     PRIMARY KEY (ts_utc, location, model, lead_days)
 );
+
+-- Out-of-sample day-ahead forecasts from the rolling-origin backtest (and baselines).
+CREATE TABLE IF NOT EXISTS backtest_forecast (
+    ts_utc TIMESTAMP NOT NULL,
+    model VARCHAR NOT NULL,
+    forecast_gco2_kwh DOUBLE,
+    PRIMARY KEY (ts_utc, model)
+);
 """
 
 
