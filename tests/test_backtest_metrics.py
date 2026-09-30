@@ -22,14 +22,15 @@ def test_folds_cover_test_period_in_order_with_training_strictly_earlier():
 def test_backtest_trains_only_on_the_past_and_never_on_test_rows(con, monkeypatch):
     seen = []
     real_fit = lgbm.fit
-    monkeypatch.setattr(lgbm, "fit", lambda X, y, **k: (seen.append(X.index), real_fit(X, y, rounds=5))[1])
+    monkeypatch.setattr(lgbm, "fit", lambda X, y, **k: (seen.append(X.index), real_fit(X, y, rounds=5, **k))[1])
     monkeypatch.setattr(backtest, "MIN_TRAIN_ROWS", 100)
     fs = build(con, date(2024, 2, 1), date(2024, 4, 20))
-    forecasts, folds = backtest.run(con, date(2024, 3, 25), date(2024, 4, 20), 7, fs=fs)
-    assert len(seen) == 2 * len(folds)
+    forecasts, price_fc, folds = backtest.run(con, date(2024, 3, 25), date(2024, 4, 20), 7, fs=fs)
+    n_models = len(backtest.MODELS)
+    assert len(seen) == n_models * len(folds)
     for i, fold in enumerate(folds.itertuples()):
         cutoff_first = pd.Timestamp(fold.test_start) - pd.Timedelta(days=1)
-        for idx in seen[2 * i: 2 * i + 2]:
+        for idx in seen[n_models * i: n_models * (i + 1)]:
             train_days = fs.meta.loc[idx, "settlement_date"]
             assert train_days.max() <= pd.Timestamp(fold.train_end)
             assert train_days.max() < cutoff_first  # strictly before D-1: labels were complete

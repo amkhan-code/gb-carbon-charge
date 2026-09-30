@@ -66,6 +66,14 @@ def _poison(con, cutoff: pd.Timestamp) -> None:
         "settlement_period, 1e6, fetched_at_utc FROM demand_forecast WHERE issued_at_utc <= ?",
         [cutoff, cutoff],
     )
+    # Day-ahead prices for delivery day D are published 10:00 UTC on D-1; realised prices after period end + lag.
+    con.execute("UPDATE price_day_ahead SET price_gbp_mwh = 1e6 WHERE "
+                f"(CAST(settlement_date AS TIMESTAMP) - INTERVAL 1 DAY + INTERVAL {config.DAY_AHEAD_PRICE_PUBLISHED_UTC.hour} HOUR) > ?",
+                [cutoff])
+    con.execute(
+        "UPDATE price_mid SET price_gbp_mwh = 1e6 WHERE ts_utc + INTERVAL 30 MINUTE + "
+        f"INTERVAL {config.MID_LAG_MINUTES} MINUTE > ?", [cutoff]
+    )
     cols = ", ".join(f"{c} = 1e6" for c in config.WEATHER_VARIABLES.values())
     con.execute(
         f"UPDATE weather_forecast SET {cols} WHERE issued_at_utc + INTERVAL {config.WEATHER_RUN_LAG_HOURS} HOUR > ?",
@@ -79,7 +87,7 @@ def test_features_unchanged_when_post_cutoff_data_is_corrupted(con, day):
     _poison(con, pd.Timestamp(cutoff_utc(day).replace(tzinfo=None)))
     after = build(con, day, day)
     pd.testing.assert_frame_equal(before.X, after.X)
-    assert not (after.X > 1e5).to_numpy().any()
+    assert not (after.X.drop(columns=[c for c in after.X if c.startswith(('mid_std', 'basis_std'))]) > 1e5).to_numpy().any()
 
 
 def test_late_demand_vintage_is_dropped_not_used(con):
@@ -103,3 +111,26 @@ def test_weather_availability_is_run_lag_after_issue(fs):
     ts = fs.X.index[fs.X[col].notna()]
     expected = ts.floor("h") - pd.Timedelta(days=config.WEATHER_FEATURE_LEAD_DAYS) + av.WEATHER_RUN_LAG
     assert (fs.avail.loc[ts, col] == expected).all()
+
+
+def test_day_ahead_price_known_for_day_d_but_next_day_hours_masked(fs):
+    day = pd.Timestamp("2024-04-03")
+    rows = fs.meta["settlement_date"] == day
+    assert fs.X.loc[rows, "da_price"].notna().all()  # published 10:00 UTC on D-1, before the cutoff
+    assert (fs.avail.loc[rows, "da_price"] <= fs.meta.loc[rows, "cutoff_utc"]).all()
+    # The last hour of day D looks ahead to D+1, whose auction is published after the cutoff.
+    last_hour = fs.meta.loc[rows, "local_hour"] >= 23
+    assert fs.X.loc[rows & last_hour, "da_price_next_hour"].isna().all()
+    assert fs.X.loc[rows & ~last_hour, "da_price_next_hour"].notna().all()
+
+
+def test_realised_price_lags_follow_the_same_cutoff_rule_as_carbon(fs):
+    day = fs.X[fs.meta["settlement_date"] == pd.Timestamp("2024-04-03")]
+    hour = fs.meta.loc[day.index, "local_hour"]
+    assert day["mid_lag_d1"].notna()[hour <= 9.5].all() and not day["mid_lag_d1"].notna()[hour > 9.5].any()
+    assert day["mid_lag_d2"].notna().all() and day["basis_lag_d2"].notna().all()
+
+
+def test_labels_are_not_features(fs):
+    assert not [c for c in fs.X.columns if "price_gbp_mwh" in c]
+    assert not any(fs.X[c].equals(fs.y_price) for c in fs.X.columns)

@@ -68,3 +68,16 @@ WEATHER_RUN_LAG_HOURS = 8
 WEATHER_FEATURE_LEAD_DAYS = 2
 
 REPORTS_DIR = Path(os.environ.get("CARBON_CHARGE_REPORTS_DIR", "reports"))
+
+
+# --- Layer 2: wholesale prices ------------------------------------------------
+# "N2EX GB Day-Ahead Price" on the NESO data portal (hourly, GBP/MWh).
+NESO_DAY_AHEAD_PRICE_RESOURCE_ID = "4f27eea5-7038-4f73-9740-e3e4ad47c26a"
+# Elexon BMRS Market Index Data (half-hourly). N2EXMIDP rows are all zero; APXMIDP carries the price.
+ELEXON_MID_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/MID"
+MID_PROVIDER = "APXMIDP"
+# The N2EX day-ahead auction closes 09:50 and publishes by 10:00 (GMT) on D-1 (Nord Pool
+# documentation). Modelled as 10:00 UTC on D-1, i.e. exactly the 11:00 UK cutoff in summer.
+DAY_AHEAD_PRICE_PUBLISHED_UTC = time(10, 0)
+# MID prices are usable this long after the END of their period (assumption, like CI actuals).
+MID_LAG_MINUTES = 60

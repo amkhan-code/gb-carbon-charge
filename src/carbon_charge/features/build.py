@@ -25,7 +25,7 @@ from carbon_charge.timeutils import (
 )
 
 # Every feature declares one of these sources.
-ALLOWED_SOURCES = {"calendar", "ci_actual", "demand_forecast", "weather_forecast"}
+ALLOWED_SOURCES = {"calendar", "ci_actual", "demand_forecast", "weather_forecast", "price_day_ahead", "price_mid"}
 
 WEATHER_ROLE_AGGREGATES = {
     # role -> (variable column, aggregate feature name)
@@ -42,7 +42,8 @@ class FeatureSet:
     avail: pd.DataFrame  # same shape as X: when each value became available (NaT where NaN)
     sources: dict[str, str]  # feature -> source kind
     meta: pd.DataFrame  # index ts_utc: settlement_date, settlement_period, cutoff_utc, local_hour
-    y: pd.Series  # actual carbon intensity (the label; never a feature)
+    y: pd.Series  # actual carbon intensity (a label; never a feature)
+    y_price: pd.Series  # realised Market Index price (a label; never a feature)
 
 
 def _grid(start: date, end: date) -> pd.DataFrame:
@@ -96,36 +97,40 @@ def _calendar(b: _Builder) -> None:
         b.add(name, "calendar", vals.astype(float), known)
 
 
-def _ci_lags(b: _Builder, ci: pd.DataFrame) -> None:
-    """Lagged carbon intensity actuals, each masked by publication time."""
+def _lag_features(
+    b: _Builder, df: pd.DataFrame, col: str, prefix: str, source: str, lag: pd.Timedelta, avail_fn
+) -> None:
+    """Lagged values of a half-hourly series, each masked by its publication time.
+
+    `df` has ts_utc, settlement_date, settlement_period and `col`. Adds
+    <prefix>_lag_d{1,2,3,7} (same settlement period k days earlier) and the state of the
+    series at the moment of the cutoff (<prefix>_last/mean_24h/mean_7d/std_24h_at_cutoff).
+    """
     m = b.meta
-    by_slot = ci.dropna(subset=["actual_gco2_kwh"]).copy()
+    by_slot = df.dropna(subset=[col]).copy()
     by_slot["settlement_date"] = pd.to_datetime(by_slot["settlement_date"])
     by_slot = by_slot.set_index(["settlement_date", "settlement_period"])
     by_slot = by_slot[~by_slot.index.duplicated()]
 
     for k in (1, 2, 3, 7):
-        key = pd.MultiIndex.from_arrays(
-            [m["settlement_date"] - pd.Timedelta(days=k), m["settlement_period"]]
-        )
+        key = pd.MultiIndex.from_arrays([m["settlement_date"] - pd.Timedelta(days=k), m["settlement_period"]])
         src = by_slot.reindex(key)
-        avail = av.ci_actual_available_at(pd.Series(src["ts_utc"].to_numpy(), index=m.index))
-        b.add(f"ci_lag_d{k}", "ci_actual", pd.Series(src["actual_gco2_kwh"].to_numpy(), index=m.index), avail)
+        avail = avail_fn(pd.Series(src["ts_utc"].to_numpy(), index=m.index))
+        b.add(f"{prefix}_lag_d{k}", source, pd.Series(src[col].to_numpy(), index=m.index), avail)
 
-    # State of the grid at the moment of the cutoff.
-    grid = ci.set_index("ts_utc")["actual_gco2_kwh"]
+    grid = df.set_index("ts_utc")[col]
+    grid = grid[~grid.index.duplicated()]
     grid = grid.reindex(pd.date_range(grid.index.min(), grid.index.max(), freq="30min"))
     roll = {
-        "ci_last_at_cutoff": grid,
-        "ci_mean_24h_at_cutoff": grid.rolling(48, min_periods=36).mean(),
-        "ci_mean_7d_at_cutoff": grid.rolling(336, min_periods=250).mean(),
-        "ci_std_24h_at_cutoff": grid.rolling(48, min_periods=36).std(),
+        f"{prefix}_last_at_cutoff": grid,
+        f"{prefix}_mean_24h_at_cutoff": grid.rolling(48, min_periods=36).mean(),
+        f"{prefix}_mean_7d_at_cutoff": grid.rolling(336, min_periods=250).mean(),
+        f"{prefix}_std_24h_at_cutoff": grid.rolling(48, min_periods=36).std(),
     }
-    last = av.latest_available_ci_period(m["cutoff_utc"])
+    last = av.latest_available_period(m["cutoff_utc"], lag)
     for name, series in roll.items():
         vals = series.reindex(last.to_numpy())
-        b.add(name, "ci_actual", pd.Series(vals.to_numpy(), index=m.index),
-              av.ci_actual_available_at(last))
+        b.add(name, source, pd.Series(vals.to_numpy(), index=m.index), avail_fn(last))
 
 
 def _demand(b: _Builder, con: duckdb.DuckDBPyConnection) -> None:
@@ -164,6 +169,51 @@ def _weather(b: _Builder, con: duckdb.DuckDBPyConnection) -> None:
         b.add(name, "weather_forecast", pd.concat([b.cols[n] for n in names], axis=1).mean(axis=1), avail)
 
 
+def _prices(b: _Builder, con: duckdb.DuckDBPyConnection) -> tuple[pd.DataFrame, pd.Series]:
+    """Day-ahead price features (known by 10:00 UTC on D-1) and lagged realised (Market Index) prices.
+
+    Returns (MID frame, day-ahead price on the half-hour grid) for building the price label.
+    """
+    m = b.meta
+    da = con.execute("SELECT ts_utc, settlement_date, price_gbp_mwh FROM price_day_ahead ORDER BY ts_utc").df()
+    da = da.drop_duplicates("ts_utc").set_index("ts_utc")
+    da["settlement_date"] = pd.to_datetime(da["settlement_date"])
+    da["published"] = av.day_ahead_published_at(da["settlement_date"])
+    hour = pd.Series(m.index.floor("h"), index=m.index)
+
+    def at(offset_h: int) -> tuple[pd.Series, pd.Series]:
+        h = hour + pd.Timedelta(hours=offset_h)
+        rows = da.reindex(h.to_numpy())
+        return (pd.Series(rows["price_gbp_mwh"].to_numpy(), index=m.index),
+                pd.Series(rows["published"].to_numpy(), index=m.index))
+
+    now, pub = at(0)
+    b.add("da_price", "price_day_ahead", now, pub)
+    for name, off in (("da_price_prev_hour", -1), ("da_price_next_hour", 1)):
+        v, p = at(off)  # the next hour can belong to D+1, published after the cutoff: masked by the gate
+        b.add(name, "price_day_ahead", v, p)
+
+    # Shape of the day's auction, per settlement day (all hours are published together).
+    grp = da.groupby("settlement_date")["price_gbp_mwh"]
+    stats = pd.DataFrame({"mean": grp.mean(), "max": grp.max(), "min": grp.min(), "std": grp.std()})
+    day = m["settlement_date"]
+    for k in stats.columns:
+        b.add(f"da_day_{k}", "price_day_ahead", pd.Series(day.map(stats[k]).to_numpy(), index=m.index), pub)
+    rank = da.groupby("settlement_date")["price_gbp_mwh"].rank(pct=True).reindex(hour.to_numpy())
+    b.add("da_rank_in_day", "price_day_ahead", pd.Series(rank.to_numpy(), index=m.index), pub)
+    b.add("da_minus_day_mean", "price_day_ahead", now - b.cols["da_day_mean"], pub)
+
+    mid = con.execute(
+        "SELECT ts_utc, settlement_date, settlement_period, price_gbp_mwh FROM price_mid ORDER BY ts_utc"
+    ).df()
+    da_half = da["price_gbp_mwh"].reindex(mid["ts_utc"].dt.floor("h").to_numpy())
+    mid["basis"] = mid["price_gbp_mwh"].to_numpy() - da_half.to_numpy()  # realised minus day-ahead
+    mid_avail = av.mid_available_at
+    _lag_features(b, mid, "price_gbp_mwh", "mid", "price_mid", av.MID_LAG, mid_avail)
+    _lag_features(b, mid, "basis", "basis", "price_mid", av.MID_LAG, mid_avail)
+    return mid, now
+
+
 def build(con: duckdb.DuckDBPyConnection, start: date, end: date) -> FeatureSet:
     """Features (and label) for every half-hour of settlement days start..end."""
     meta = _grid(start, end)
@@ -172,9 +222,10 @@ def build(con: duckdb.DuckDBPyConnection, start: date, end: date) -> FeatureSet:
         "SELECT ts_utc, settlement_date, settlement_period, actual_gco2_kwh FROM ci_history ORDER BY ts_utc"
     ).df()
     _calendar(b)
-    _ci_lags(b, ci)
+    _lag_features(b, ci, "actual_gco2_kwh", "ci", "ci_actual", av.CI_ACTUAL_LAG, av.ci_actual_available_at)
     _demand(b, con)
     _weather(b, con)
+    mid, _ = _prices(b, con)
     y = ci.set_index("ts_utc")["actual_gco2_kwh"].reindex(meta.index).rename("actual_gco2_kwh")
     return FeatureSet(
         X=pd.DataFrame(b.cols),
@@ -182,4 +233,5 @@ def build(con: duckdb.DuckDBPyConnection, start: date, end: date) -> FeatureSet:
         sources=b.sources,
         meta=meta,
         y=y,
+        y_price=mid.drop_duplicates("ts_utc").set_index("ts_utc")["price_gbp_mwh"].reindex(meta.index).rename("price_gbp_mwh"),
     )

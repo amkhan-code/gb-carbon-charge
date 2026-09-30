@@ -19,6 +19,23 @@ def _ts(start: date, end: date, freq: str) -> pd.DatetimeIndex:
     return pd.date_range(lo, hi, freq=freq, inclusive="left")
 
 
+def populate_prices(con, rng) -> None:
+    hours = _ts(START, END, "60min")
+    da = add_settlement_columns(pd.DataFrame({"ts_utc": hours}))
+    hr = hours.hour
+    da["price_gbp_mwh"] = 80 + 30 * np.sin(2 * np.pi * (hr - 6) / 24) + rng.normal(0, 8, len(hours))
+    da["fetched_at_utc"] = pd.Timestamp("2024-06-01")
+    db.upsert(con, "price_day_ahead", da)
+
+    ts = _ts(START, END, "30min")
+    mid = add_settlement_columns(pd.DataFrame({"ts_utc": ts}))
+    base = pd.Series(da["price_gbp_mwh"].to_numpy(), index=hours).reindex(ts.floor("h")).to_numpy()
+    mid["price_gbp_mwh"] = base + rng.normal(0, 12, len(ts))
+    mid["volume_mwh"] = 1000.0
+    mid["fetched_at_utc"] = pd.Timestamp("2024-06-01")
+    db.upsert(con, "price_mid", mid)
+
+
 def populate(con) -> None:
     rng = np.random.default_rng(0)
     ts = _ts(START, END, "30min")
@@ -49,6 +66,7 @@ def populate(con) -> None:
     w["model"] = config.WEATHER_MODEL
     w["fetched_at_utc"] = pd.Timestamp("2024-06-01")
     db.upsert(con, "weather_forecast", w)
+    populate_prices(con, rng)
 
 
 @pytest.fixture()

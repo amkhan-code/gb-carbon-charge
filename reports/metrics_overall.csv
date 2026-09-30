@@ -2,4 +2,5 @@ model,n,mae,rmse
 last_week,30564,53.87,68.36
 lgbm,30564,19.17,24.7
 lgbm_noweather,30564,32.94,41.21
+lgbm_price,30564,18.05,23.37
 yesterday,30564,43.45,55.95

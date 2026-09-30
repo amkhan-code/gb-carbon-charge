@@ -138,3 +138,77 @@ def test_simulate_uses_same_nights_and_orders_strategies():
 def test_mon_wed_fri_scenario_only_includes_those_nights():
     sc = next(s for s in sensitivity_set() if s.nights == "mon_wed_fri")
     assert [sc.includes(date(2024, 1, d)) for d in range(15, 22)] == [True, False, True, False, True, False, False]
+
+
+# --- cost / carbon blend -------------------------------------------------------
+
+from carbon_charge.charging import blend  # noqa: E402
+
+
+def _series(nights, seed, lo=20, hi=300):
+    rng = np.random.default_rng(seed)
+    idx = pd.DatetimeIndex(sorted({t for n in nights for t in st.window_slots(n, replace(DEFAULT, plug_in=time(17)))}))
+    return pd.Series(rng.uniform(lo, hi, len(idx)), index=idx)
+
+
+def test_slot_cost_units_and_limits():
+    price, ci = pd.Series([100.0]), pd.Series([200.0])
+    assert blend.slot_cost(price, ci, 0).iloc[0] == pytest.approx(0.1)  # GBP 100/MWh = GBP 0.1/kWh
+    # 200 g/kWh at GBP 250/t = 200e-6 t * 250 = GBP 0.05/kWh on top
+    assert blend.slot_cost(price, ci, 250).iloc[0] == pytest.approx(0.15)
+    assert blend.slot_cost(price, ci, None).iloc[0] == 200.0  # carbon only
+
+
+def test_blend_reduces_to_layer_1_when_carbon_only():
+    nights = [NORMAL, SPRING_NIGHT, AUTUMN_NIGHT]
+    ci, price = _series(nights, 1), _series(nights, 2, 30, 200)
+    fc_ci = ci + np.random.default_rng(3).normal(0, 20, len(ci))
+    long = blend.simulate(ci, price, {"m": (fc_ci, price)}, DEFAULT, nights, None)
+    old = value.simulate(ci, {"m": fc_ci}, DEFAULT, nights)
+    got = long.pivot(index="night", columns="strategy", values="carbon_g")
+    for col in ("arrival", "timer", "perfect", "m"):
+        assert got[col].to_numpy() == pytest.approx(old[col].to_numpy())
+
+
+def test_cost_only_ignores_carbon_forecast_and_delivers_energy():
+    nights = [NORMAL, SPRING_NIGHT, AUTUMN_NIGHT]
+    ci, price = _series(nights, 1), _series(nights, 2, 30, 200)
+    bad_ci = _series(nights, 9)
+    long = blend.simulate(ci, price, {"a": (ci, price), "b": (bad_ci, price)}, DEFAULT, nights, 0)
+    piv = long.pivot(index="night", columns="strategy", values="cost_gbp")
+    assert piv["a"].to_numpy() == pytest.approx(piv["b"].to_numpy())  # carbon forecast irrelevant at lam=0
+    assert (piv["perfect"] <= piv[["arrival", "timer", "a", "b"]].min(axis=1) + 1e-9).all()
+    # 8 kWh at GBP p/MWh: cost bounds are 8 kWh x min and max slot price
+    assert (long["cost_gbp"] > 0).all()
+
+
+@pytest.mark.parametrize("lam", [0, 100, 1000, None])
+def test_perfect_foresight_is_optimal_on_the_blended_objective(lam):
+    nights = [NORMAL, SPRING_NIGHT, AUTUMN_NIGHT]
+    for seed in range(10):
+        ci, price = _series(nights, seed), _series(nights, seed + 50, -20, 250)  # negative prices are real
+        noisy = (ci + np.random.default_rng(seed).normal(0, 50, len(ci)), price + 30)
+        long = blend.simulate(ci, price, {"m": noisy}, DEFAULT, nights, lam)
+        j = long.assign(j=blend.objective(long["cost_gbp"].to_numpy(), long["carbon_g"].to_numpy(), lam)).pivot(
+            index="night", columns="strategy", values="j")
+        assert (j["perfect"] <= j.drop(columns="perfect").min(axis=1) + 1e-9).all()
+
+
+def test_higher_carbon_price_moves_plan_toward_lower_carbon():
+    nights = [NORMAL, date(2024, 1, 16), date(2024, 1, 17)]
+    ci, price = _series(nights, 4), _series(nights, 5, 30, 200)
+    carbon = {}
+    for lam in (0, 1000, None):
+        long = blend.simulate(ci, price, {}, DEFAULT, nights, lam)
+        carbon[lam] = long[long.strategy == "perfect"]["carbon_g"].sum()
+    assert carbon[None] <= carbon[1000] <= carbon[0] + 1e-9
+
+
+def test_blend_summary_columns_and_gap_bounds():
+    nights = [date(2024, 1, d) for d in range(10, 25)]
+    ci, price = _series(nights, 6), _series(nights, 7, 30, 200)
+    long = blend.simulate(ci, price, {"m": (ci, price)}, DEFAULT, nights, 250)
+    s = blend.summarize(long, ["m"], 250, n_boot=50).set_index("strategy")
+    assert s.loc["m", "gap_captured"] == pytest.approx(1.0)  # perfect forecasts capture the whole gap
+    assert s.loc["timer", "gap_captured"] == pytest.approx(0.0)
+    assert {"mean_cost_gbp", "mean_carbon_g", "lam"} <= set(s.columns)

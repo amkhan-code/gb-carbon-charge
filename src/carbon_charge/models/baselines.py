@@ -44,3 +44,24 @@ def neso_latest_revision(con: duckdb.DuckDBPyConnection, fs: FeatureSet) -> pd.S
     """REFERENCE ONLY. The API's historical `forecast` field is not day-ahead (DATA_ISSUES CI-1)."""
     ci = con.execute("SELECT ts_utc, neso_forecast_latest_gco2_kwh v FROM ci_history").df()
     return ci.set_index("ts_utc")["v"].reindex(fs.meta.index)
+
+
+# --- Realised (Market Index) price baselines -----------------------------------
+
+def price_day_ahead(fs: FeatureSet) -> pd.Series:
+    """The known day-ahead auction price used directly as the forecast of the realised price."""
+    return fs.X["da_price"]
+
+
+def price_yesterday(fs: FeatureSet) -> pd.Series:
+    """Realised price for the same period yesterday, falling back to D-2 (cutoff-aware)."""
+    return fs.X["mid_lag_d1"].fillna(fs.X["mid_lag_d2"])
+
+
+def price_last_week(fs: FeatureSet) -> pd.Series:
+    return fs.X["mid_lag_d7"]
+
+
+def price_da_plus_basis(fs: FeatureSet) -> pd.Series:
+    """Day-ahead price plus the trailing 7-day mean gap between realised and day-ahead prices."""
+    return fs.X["da_price"] + fs.X["basis_mean_7d_at_cutoff"]

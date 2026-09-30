@@ -2,5 +2,6 @@ model,n,mae,rmse
 last_week,30521,53.86,68.37
 lgbm,30521,19.17,24.7
 lgbm_noweather,30521,32.93,41.2
+lgbm_price,30521,18.06,23.38
 neso_latest_revision,30521,9.64,13.56
 yesterday,30521,43.44,55.96

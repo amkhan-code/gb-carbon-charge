@@ -60,6 +60,33 @@ CREATE TABLE IF NOT EXISTS weather_forecast (
     PRIMARY KEY (ts_utc, location, model, lead_days)
 );
 
+-- N2EX day-ahead auction prices, hourly. The source labels hours in UTC (DATA_ISSUES PX-1).
+CREATE TABLE IF NOT EXISTS price_day_ahead (
+    ts_utc TIMESTAMP PRIMARY KEY,  -- start of the delivery hour
+    settlement_date DATE NOT NULL,  -- of the hour's first half-hour
+    settlement_period SMALLINT NOT NULL,
+    price_gbp_mwh DOUBLE,
+    fetched_at_utc TIMESTAMP NOT NULL
+);
+
+-- Elexon Market Index Data (APX), half-hourly. A within-day traded index published after delivery.
+CREATE TABLE IF NOT EXISTS price_mid (
+    ts_utc TIMESTAMP PRIMARY KEY,
+    settlement_date DATE NOT NULL,
+    settlement_period SMALLINT NOT NULL,
+    price_gbp_mwh DOUBLE,
+    volume_mwh DOUBLE,
+    fetched_at_utc TIMESTAMP NOT NULL
+);
+
+-- Out-of-sample forecasts of the realised Market Index price (GBP/MWh), same layout as below.
+CREATE TABLE IF NOT EXISTS backtest_price_forecast (
+    ts_utc TIMESTAMP NOT NULL,
+    model VARCHAR NOT NULL,
+    forecast_gbp_mwh DOUBLE,
+    PRIMARY KEY (ts_utc, model)
+);
+
 -- Out-of-sample day-ahead forecasts from the rolling-origin backtest (and baselines).
 CREATE TABLE IF NOT EXISTS backtest_forecast (
     ts_utc TIMESTAMP NOT NULL,

@@ -1,0 +1,6 @@
+model,n,mae,rmse
+price_da,30510,12.27,24.95
+price_da_basis7d,30510,13.0,25.57
+price_last_week,30510,28.38,48.2
+price_lgbm,30510,12.22,24.64
+price_yesterday,30510,25.7,45.76

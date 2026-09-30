@@ -6,11 +6,13 @@ import duckdb
 import pandas as pd
 
 from carbon_charge import config
-from carbon_charge.charging import value
+from carbon_charge.charging import blend, value
 from carbon_charge.charging.scenarios import DEFAULT, sensitivity_set
 from carbon_charge.evaluation import metrics, ranking
 
 CORE = metrics.CORE_MODELS
+PRICE_CORE = metrics.PRICE_CORE_MODELS
+COST_ONLY, CARBON_ONLY, MID_LAMBDA = 0, None, 250
 MIN_NESO_NIGHTS = 14
 
 
@@ -19,6 +21,14 @@ def _load(con: duckdb.DuckDBPyConnection) -> tuple[pd.DataFrame, pd.Series]:
     if fc.empty:
         raise SystemExit("backtest_forecast is empty: run `carbon-charge backtest` first")
     act = con.execute("SELECT ts_utc, actual_gco2_kwh a FROM ci_history").df().set_index("ts_utc")["a"]
+    return fc, act
+
+
+def _load_price(con: duckdb.DuckDBPyConnection) -> tuple[pd.DataFrame, pd.Series]:
+    fc = con.execute("SELECT ts_utc, model, forecast_gbp_mwh FROM backtest_price_forecast").df()
+    if fc.empty:
+        raise SystemExit("backtest_price_forecast is empty: run `carbon-charge backtest` first")
+    act = con.execute("SELECT ts_utc, price_gbp_mwh p FROM price_mid").df().set_index("ts_utc")["p"]
     return fc, act
 
 
@@ -43,6 +53,12 @@ def evaluate(con: duckdb.DuckDBPyConnection) -> dict[str, pd.DataFrame]:
         r = ranking.ranking_accuracy(act, {m: wide[m] for m in CORE + ["neso_logged"]}, _nights(fc))
         if not r.empty:
             out["ranking_neso_nights"] = r
+    pfc, pact = _load_price(con)
+    pdf = metrics.eval_frame(pfc, pact)
+    for name, t in metrics.tables(pdf, PRICE_CORE).items():
+        out[f"price_{name}"] = t
+    pwide = {m: g.set_index("ts_utc")["forecast_gbp_mwh"] for m, g in pfc.groupby("model")}
+    out["price_ranking"] = ranking.ranking_accuracy(pact, {m: pwide[m] for m in PRICE_CORE}, _nights(pfc))
     return out
 
 
@@ -65,7 +81,36 @@ def optimise(con: duckdb.DuckDBPyConnection) -> dict[str, pd.DataFrame]:
         out["optimiser_neso_nights_available"] = pd.DataFrame({"nights": [len(sim)]})
         if len(sim) >= MIN_NESO_NIGHTS:
             out["optimiser_neso"] = value.summarize(sim, CORE + ["neso_logged"]).assign(scenario=DEFAULT.name)
+    out.update(optimise_blend(con))
     return out
+
+
+def optimise_blend(con: duckdb.DuckDBPyConnection) -> dict[str, pd.DataFrame]:
+    """Cost/carbon frontier (default car) and cost-only sensitivity, for the price-forecast pipelines."""
+    fc, act_ci = _load(con)
+    pfc, act_price = _load_price(con)
+    ci = {m: g.set_index("ts_utc")["forecast_gco2_kwh"] for m, g in fc.groupby("model")}
+    pr = {m: g.set_index("ts_utc")["forecast_gbp_mwh"] for m, g in pfc.groupby("model")}
+    pipelines = {
+        "model": (ci["lgbm_price"], pr["price_lgbm"]),
+        "day_ahead": (ci["lgbm_price"], pr["price_da"]),
+        "da_basis": (ci["lgbm_price"], pr["price_da_basis7d"]),
+        "naive": (ci["last_week"], pr["price_last_week"]),
+    }
+    nights = _nights(fc)
+    names = list(pipelines)
+    frontier, sens = [], []
+    for lam in blend.LAMBDAS:
+        long = blend.simulate(act_ci, act_price, pipelines, DEFAULT, nights, lam)
+        frontier.append(blend.summarize(long, names, lam).assign(scenario=DEFAULT.name))
+    for sc in sensitivity_set():
+        long = blend.simulate(act_ci, act_price, pipelines, sc, nights, COST_ONLY)
+        if not long.empty:
+            sens.append(blend.summarize(long, names, COST_ONLY).assign(scenario=sc.name))
+    return {
+        "optimiser_blend_frontier": pd.concat(frontier, ignore_index=True),
+        "optimiser_blend_cost_sensitivity": pd.concat(sens, ignore_index=True),
+    }
 
 
 def write_csvs(tables: dict[str, pd.DataFrame]) -> None:
@@ -97,7 +142,8 @@ def render() -> str:
     folds = pd.read_csv(config.REPORTS_DIR / "backtest_folds.csv")
     overall, season, tod = read("metrics_overall"), read("metrics_by_season"), read("metrics_by_time_of_day")
     ranking_t, opt = read("ranking"), read("optimiser_summary")
-    names = {"lgbm": "LightGBM", "lgbm_noweather": "LightGBM without weather", "yesterday": "Same period yesterday*",
+    names = {"lgbm": "LightGBM", "lgbm_noweather": "LightGBM without weather",
+             "lgbm_price": "LightGBM + price features", "yesterday": "Same period yesterday*",
              "last_week": "Same period last week", "neso_logged": "NESO forecast (logged)",
              "arrival": "Charge on arrival", "timer": "Overnight timer (00:00)", "perfect": "Perfect foresight"}
     nm = lambda s: s.map(lambda x: names.get(x, x))  # noqa: E731
@@ -167,4 +213,94 @@ def render() -> str:
         "- The optimiser plans each half-hour with the forecast for its own settlement day (issued 11:00 on the day before that day).",
         "- Publication lags for carbon intensity actuals (1 h) and ECMWF runs (8 h) are assumptions; see `DATA_ISSUES.md` X-1, WX-2.",
     ]
-    return "\n".join(parts) + "\n"
+    return "\n".join(parts) + "\n\n" + "\n".join(_render_layer2(read)) + "\n"
+
+
+def _render_layer2(read) -> list[str]:
+    pnames = {"price_lgbm": "LightGBM (basis model)", "price_da": "Day-ahead price as forecast",
+              "price_da_basis7d": "Day-ahead + 7-day basis", "price_yesterday": "Same period yesterday*",
+              "price_last_week": "Same period last week"}
+    pipe = {"arrival": "Charge on arrival", "timer": "Overnight timer (00:00)",
+            "naive": "Forecast-optimised: last week's carbon and price",
+            "day_ahead": "Forecast-optimised: LightGBM carbon + known day-ahead price",
+            "da_basis": "Forecast-optimised: LightGBM carbon + day-ahead + 7-day basis",
+            "model": "Forecast-optimised: LightGBM carbon + LightGBM price",
+            "perfect": "Perfect foresight"}
+    po, ps, pt = read("metrics_price_overall"), read("metrics_price_by_season"), read("metrics_price_by_time_of_day")
+    pr, fr, sens = read("metrics_price_ranking"), read("optimiser_blend_frontier"), read("optimiser_blend_cost_sensitivity")
+    ci_overall = read("metrics_overall").set_index("model")
+
+    def pair(df, index):
+        d = df.assign(cell=df["mae"].map("{:.1f}".format) + " / " + df["rmse"].map("{:.1f}".format))
+        order = [m for m in PRICE_CORE if m in set(d["model"])]
+        out = d.pivot(index=index, columns="model", values="cell")[order].reset_index()
+        return out.rename(columns=pnames)
+
+    overall = po.assign(model=po["model"].map(pnames))[["model", "n", "mae", "rmse"]]
+    overall.columns = ["Model", "Half-hours", "MAE", "RMSE"]
+    rk = pr.copy()
+    rk["source"] = rk["source"].replace({"random": "Random choice"}).map(lambda x: pnames.get(x, x))
+    rk["cell"] = (100 * rk["mean_overlap"]).round(0).astype(int).astype(str) + "%"
+    rk = rk.pivot(index="source", columns="k", values="cell").reset_index()
+    rk.columns = ["Forecast"] + [f"Cheapest {c} slots" for c in rk.columns[1:]]
+
+    fr = fr.assign(lam=fr["lam"].astype(str))
+    cost = fr[fr["lam"] == "0"].set_index("strategy").loc[list(pipe)].reset_index()
+    cost["gap"] = cost.apply(lambda r: f"{100 * r['gap_captured']:.0f}%" + (
+        "" if pd.isna(r["gap_ci_low"]) else f" ({100 * r['gap_ci_low']:.0f} to {100 * r['gap_ci_high']:.0f}%)"), axis=1)
+    cost["Strategy"] = cost["strategy"].map(pipe)
+    cost = cost[["Strategy", "nights", "mean_cost_gbp", "saving_vs_timer_pct", "gap"]]
+    cost = cost.assign(mean_cost_gbp=cost["mean_cost_gbp"].round(3), saving_vs_timer_pct=cost["saving_vs_timer_pct"].round(1))
+    cost.columns = ["Strategy", "Nights", "Wholesale cost per night (GBP)", "Saving vs timer (%)", "Gap captured (95% CI)"]
+
+    order = ["0", "50", "100", "250", "500", "1000", "2500", "carbon only"]
+    rows = []
+    for lam in order:
+        f = fr[fr["lam"] == lam].set_index("strategy")
+        cg = lambda k: f"{f.loc[k, 'mean_cost_gbp']:.3f} / {f.loc[k, 'mean_carbon_g']:.0f}"  # noqa: E731
+        gap = lambda k: f"{100 * f.loc[k, 'gap_captured']:.0f}%"  # noqa: E731
+        label = "cost only" if lam == "0" else ("carbon only" if lam == "carbon only" else f"GBP {lam}/t")
+        rows.append([label, cg("timer"), cg("model"), cg("perfect"), gap("model"), gap("day_ahead")])
+    frontier = pd.DataFrame(rows, columns=["Carbon price", "Timer (GBP / g)", "LightGBM pipeline (GBP / g)",
+                                           "Perfect foresight (GBP / g)", "Gap captured: LightGBM", "Gap captured: day-ahead price"])
+
+    sens = sens.assign(cell=(100 * sens["gap_captured"]).round(0).astype(int).astype(str) + "%")
+    sens = sens[sens["strategy"].isin(["model", "day_ahead", "da_basis", "naive"])]
+    sens = sens.pivot(index="scenario", columns="strategy", values="cell")[["model", "day_ahead", "da_basis", "naive"]]
+    sens = sens.reindex([sc.name for sc in sensitivity_set() if sc.name in sens.index]).reset_index()
+    sens.columns = ["Scenario", "LightGBM price", "Day-ahead price", "Day-ahead + basis", "Last week"]
+
+    lg, lp = ci_overall.loc["lgbm", "mae"], ci_overall.loc["lgbm_price", "mae"]
+    return [
+        "# Layer 2: wholesale prices\n",
+        "The price being forecast is the **realised Elexon Market Index (APX) price**, half-hourly. "
+        "The N2EX day-ahead auction price for day D is published by 10:00 GMT on D-1, before the 11:00 UK cutoff, "
+        "so it is known when planning and is used as a feature and as the natural baseline. "
+        "The LightGBM price model predicts the *basis* (realised minus day-ahead) and adds it back.\n",
+        "## Price forecast accuracy (MAE / RMSE, GBP/MWh)\n",
+        "All models scored on exactly the same half-hours.\n",
+        _md(overall), "",
+        "### By season\n", _md(pair(ps, "season")), "",
+        "### By time of day (UK local, 4-hour blocks)\n", _md(pair(pt, "tod_block")), "",
+        "### Cheapest-slot ranking in the charging window (18:00-07:00)\n", _md(rk), "",
+        "## Does price information help the carbon forecast?\n",
+        f"Adding day-ahead and realised-price features to the carbon model changes its MAE from {lg:.2f} to {lp:.2f} gCO2/kWh "
+        "(see the Layer 1 table for both, on the same half-hours).\n",
+        "## Cost-only charging: share of the timer-to-perfect-foresight gap captured\n",
+        "Default car (18:00, 8 kWh by 07:00, 7 kW). Cost is wholesale only: energy priced at the realised Market Index price, "
+        "with no network charges, levies or supplier margin. Negative prices count as negative cost.\n",
+        _md(cost), "",
+        "## Cost/carbon trade-off\n",
+        "Each slot is ranked by `price/1000 + lam x carbon/1e6` (GBP/kWh), where lam is a carbon price in GBP per tonne. "
+        "Cells show realised wholesale cost per night (GBP) / carbon per night (g). "
+        "'Gap captured' is measured on that blended objective.\n",
+        _md(frontier), "",
+        "## Cost-only sensitivity: gap captured by scenario\n", _md(sens), "",
+        "## Layer 2 caveats\n",
+        "- Realised cost uses the Market Index price. A real supplier tariff differs (fixed shape, standing charges, network costs).",
+        "- Market Index prices are published after each period; they are usable as lags only once the period has ended plus a 1 h assumed lag "
+        "(`DATA_ISSUES.md` X-4, PX-7).",
+        "- The day-ahead publication time (10:00 UTC on D-1) is an assumption; in winter it is an hour before the cutoff, "
+        "in summer exactly at it (PX-3).",
+        "- 38 half-hours with no traded volume have no realised price and are excluded from training and scoring (PX-4).",
+    ]

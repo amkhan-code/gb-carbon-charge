@@ -123,3 +123,44 @@ Source: "Day Ahead Half Hourly Demand Forecast Performance". Chosen because it h
 - `libomp` is normally installed with Homebrew, which is absent on the development machine. Local
   runs borrowed the copy bundled in scikit-learn's wheel via DYLD_LIBRARY_PATH. Linux (Docker, CI)
   installs `libgomp1` and is unaffected.
+
+## Wholesale prices (Layer 2)
+
+### PX-1: the N2EX day-ahead dataset is labelled in UTC, not UK local time
+- NESO's "N2EX GB Day-Ahead Price" has `Date` + `Delivery Period` ("HH:00 - HH+1:00") and exactly
+  24 rows on every day, including the 23- and 25-hour clock-change days. A UK-local dataset could
+  not do that. Cross-correlating with Elexon's half-hourly UTC-stamped index over winter, summer and
+  post-change weeks peaks at zero hour shift in every case (r ~0.82-0.87), so the labels are UTC hours.
+- Handling: `ts_utc` = Date + label hour. Settlement date/period are derived from that UTC instant, so
+  a UTC date does NOT equal a settlement date (in summer the 23:00 UTC hour belongs to the next day).
+- Status: inferred, not documented by NESO. Re-check if NESO changes the file.
+
+### PX-2: the NESO day-ahead dataset lags the auction
+- The auction publishes by 10:00 GMT on D-1 (Nord Pool), yet at 12:35 UTC on 2026-09-30 the dataset
+  stopped at 2026-09-30 21:00 UTC: tomorrow's prices were not there and the last hours of today's were
+  missing. The resource `last_modified` field is also stale (2026-09-21).
+- Handling: for backtests the price is treated as available at 10:00 UTC on D-1 (when the exchange
+  published it). For LIVE use, the NESO feed cannot be relied on before the 11:00 UK cutoff.
+- Status: open; a live pipeline would need the exchange feed or to log the dataset's update times.
+
+### PX-3: day-ahead publication time is an assumption
+- Nord Pool documents gate closure 09:50 and results by 10:00 GMT (the search result was ambiguous
+  about GMT vs UK local). Modelled as 10:00 UTC on D-1, which equals the cutoff in summer (11:00 BST)
+  and is an hour early in winter. Delays happen (a 4 Jan 2025 notice shows results at 10:17).
+
+### PX-4: MID zero-volume rows carry a placeholder price
+- 38 half-hours (2023-01, 2023-08, 2025-06, 2026-05/07/09 ...) have volume 0 and price 0.00. Stored
+  with a NULL price. The `N2EXMIDP` provider is zero in every row and is ignored; `APXMIDP` is used.
+
+### PX-5: MID gaps
+- 6 half-hours missing entirely (2023-05-26 11:30, 2023-06-07 17:30, 2023-07-31 02:30, 2023-11-11 07:30,
+  2023-12-12 19:00, 2024-04-13 07:00 UTC). Left absent.
+
+### PX-6: negative and spiky prices are real
+- Day-ahead: 555 negative hours (107/176/177/95 in 2023-26), min -54.2, max 980. MID: 1,753 negative
+  half-hours, min -102.9, max 1,352.9. These are market outcomes, not errors; not clipped.
+
+### PX-7: MID is not a day-ahead price
+- MID is a within-day traded index published after delivery. It can only be a lagged feature or an
+  outturn for scoring, never a value known at the cutoff for the target day. Day-ahead vs MID: MAE
+  10-15 GBP/MWh, correlation 0.73-0.89 by year.

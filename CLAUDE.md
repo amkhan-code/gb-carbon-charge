@@ -3,8 +3,8 @@
 Day-ahead forecasting of half-hourly GB carbon intensity, used to optimise an
 EV charging schedule and measure the value over simple baselines.
 
-The project is built in layers. **Layer 1 (current): carbon intensity, end to
-end.** Wholesale prices come in a later layer; do not add them yet.
+The project is built in layers. **Layer 1 (done): carbon intensity, end to end.**
+**Layer 2 (done): wholesale prices** (see the Layer 2 section below).
 
 ## Working style
 
@@ -85,3 +85,24 @@ end.** Wholesale prices come in a later layer; do not add them yet.
   cutoff.
 - Optimiser correctness: energy delivered, power limit respected, ready on
   time.
+
+## Layer 2: wholesale prices
+
+Decisions so far (from the user): forecast prices as well as ingest them; use both price series;
+the charging optimiser reports cost-only, carbon-only and a weighted trade-off.
+
+- Sources: N2EX day-ahead auction prices (NESO data portal, hourly, GBP/MWh) and Elexon Market
+  Index Data (`APXMIDP`, half-hourly). Same storage rules: UTC key plus settlement date/period.
+- The N2EX source labels hours in UTC (DATA_ISSUES PX-1). Never assume UK local time for it.
+- Leakage: the day-ahead price for day D is published by 10:00 GMT on D-1, before the 11:00 UK
+  cutoff, so it is KNOWN when planning and is a legitimate feature. MID prices are published after
+  delivery: only usable once the period has ended plus the lag in `config.py`.
+- Because day-ahead prices are known at the cutoff, the price forecast target is the REALISED
+  Market Index price, predicted as day-ahead price + a learned basis (user's choice). Cost is
+  wholesale only, priced at the realised Market Index price.
+- Layer 1 models (`lgbm`, `lgbm_noweather`) must keep excluding price features so their results do
+  not change; price features go only into `lgbm_price` and `price_lgbm`.
+- The blended objective is `price/1000 + lam * carbon/1e6` (GBP/kWh), lam in GBP per tonne;
+  lam=0 is cost only, lam=None is carbon only (identical to Layer 1).
+- Same rules as Layer 1: rolling-origin backtests, tests for clock-change days and leakage,
+  every data problem logged in `DATA_ISSUES.md`. Pause for inspection after ingestion.

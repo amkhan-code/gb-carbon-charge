@@ -7,12 +7,17 @@ from carbon_charge.timeutils import UK
 
 SEASONS = {12: "DJF", 1: "DJF", 2: "DJF", 3: "MAM", 4: "MAM", 5: "MAM",
            6: "JJA", 7: "JJA", 8: "JJA", 9: "SON", 10: "SON", 11: "SON"}
-CORE_MODELS = ["lgbm", "lgbm_noweather", "yesterday", "last_week"]
+CORE_MODELS = ["lgbm", "lgbm_noweather", "lgbm_price", "yesterday", "last_week"]
+PRICE_CORE_MODELS = ["price_lgbm", "price_da", "price_da_basis7d", "price_yesterday", "price_last_week"]
 
 
 def eval_frame(forecasts: pd.DataFrame, actual: pd.Series) -> pd.DataFrame:
-    """Long frame: ts_utc, model, forecast, actual, error, season, tod_block, local_hour."""
-    df = forecasts.rename(columns={"forecast_gco2_kwh": "forecast"}).copy()
+    """Long frame: ts_utc, model, forecast, actual, error, season, tod_block, local_hour.
+
+    `forecasts` has ts_utc, model and one value column (carbon or price).
+    """
+    value_col = [c for c in forecasts.columns if c.startswith("forecast_")][0]
+    df = forecasts.rename(columns={value_col: "forecast"}).copy()
     df["actual"] = df["ts_utc"].map(actual)
     df = df.dropna(subset=["forecast", "actual"])
     local = df["ts_utc"].dt.tz_localize("UTC").dt.tz_convert(UK)

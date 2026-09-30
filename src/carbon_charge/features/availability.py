@@ -36,3 +36,22 @@ def latest_available_ci_period(cutoff: pd.Series) -> pd.Series:
 def weather_available_at(issued_at: pd.Series) -> pd.Series:
     """A stored weather forecast is usable WEATHER_RUN_LAG after its (upper-bound) issue time."""
     return issued_at + WEATHER_RUN_LAG
+
+
+MID_LAG = pd.Timedelta(minutes=config.MID_LAG_MINUTES)
+
+
+def mid_available_at(period_start: pd.Series) -> pd.Series:
+    """A Market Index price is usable MID_LAG after its period ends."""
+    return period_start + HALF_HOUR + MID_LAG
+
+
+def latest_available_period(cutoff: pd.Series, lag: pd.Timedelta) -> pd.Series:
+    """Start of the last half-hour whose value (published `lag` after it ends) is available at `cutoff`."""
+    return (cutoff - lag - HALF_HOUR).dt.floor("30min")
+
+
+def day_ahead_published_at(settlement_date: pd.Series) -> pd.Series:
+    """The day-ahead auction for settlement day D is published at 10:00 UTC on D-1."""
+    t = config.DAY_AHEAD_PRICE_PUBLISHED_UTC
+    return pd.to_datetime(settlement_date) - pd.Timedelta(days=1) + pd.Timedelta(hours=t.hour, minutes=t.minute)

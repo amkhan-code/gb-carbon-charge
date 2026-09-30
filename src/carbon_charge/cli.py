@@ -8,7 +8,7 @@ import typer
 from carbon_charge import config, db
 from carbon_charge import report as report_mod
 from carbon_charge.evaluation import backtest as backtest_mod
-from carbon_charge.ingest import carbon_intensity, demand_forecast, weather
+from carbon_charge.ingest import carbon_intensity, demand_forecast, prices, weather
 from carbon_charge.timeutils import UTC
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -55,12 +55,26 @@ def ingest_weather(
         typer.echo(f"weather_forecast: {weather.ingest(con, a, b)} rows")
 
 
+@ingest_app.command("prices")
+def ingest_prices(
+    start: str = typer.Option(None, help="First UTC date for MID, YYYY-MM-DD."),
+    end: str = typer.Option(None, help="Last UTC date for MID (default: today)."),
+) -> None:
+    """N2EX day-ahead prices (hourly) and Elexon Market Index prices (half-hourly)."""
+    a = _parse_date(start, config.HISTORY_START)
+    b = _parse_date(end, datetime.now(UTC).date())
+    with db.connect() as con:
+        typer.echo(f"price_day_ahead: {prices.ingest_day_ahead(con)} rows")
+        typer.echo(f"price_mid: {prices.ingest_mid(con, a, b)} rows")
+
+
 @ingest_app.command("all")
 def ingest_all() -> None:
     """Run every ingester over the full default history."""
     ingest_carbon(start=None, end=None)
     ingest_demand()
     ingest_weather(start=None, end=None)
+    ingest_prices(start=None, end=None)
 
 
 @app.command("log-forecast")
@@ -89,16 +103,19 @@ def backtest(
     refit_days: int = typer.Option(14, help="Refit the model every N days."),
 ) -> None:
     """Rolling-origin backtest; stores out-of-sample forecasts in DuckDB (backtest_forecast)."""
-    with db.connect() as con:
+    # Read-only while computing (minutes); the database is opened for writing only to save.
+    with db.connect(read_only=True) as con:
         last = con.execute(
             "SELECT max(settlement_date) FROM ci_history GROUP BY settlement_date "
             "HAVING count(*) >= 46 ORDER BY 1 DESC LIMIT 1"
         ).fetchone()[0]
         end_d = date.fromisoformat(end) if end else last
-        forecasts, folds = backtest_mod.run(con, date.fromisoformat(start), end_d, refit_days)
-        typer.echo(f"{len(folds)} folds, {len(forecasts)} forecasts, {backtest_mod.save(con, forecasts)} saved")
-        config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        folds.to_csv(config.REPORTS_DIR / "backtest_folds.csv", index=False)
+        ci, price, folds = backtest_mod.run(con, date.fromisoformat(start), end_d, refit_days)
+    with db.connect() as con:
+        typer.echo(f"{len(folds)} folds, {len(ci)} carbon + {len(price)} price forecasts, "
+                   f"{backtest_mod.save(con, ci, price)} saved")
+    config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    folds.to_csv(config.REPORTS_DIR / "backtest_folds.csv", index=False)
 
 
 @app.command()
@@ -134,7 +151,7 @@ def report() -> None:
 def status() -> None:
     """Row counts and time coverage per table."""
     with db.connect(read_only=True) as con:
-        for table in ("ci_history", "ci_forecast_log", "demand_forecast", "weather_forecast"):
+        for table in ("ci_history", "ci_forecast_log", "demand_forecast", "weather_forecast", "price_day_ahead", "price_mid"):
             n, lo, hi = con.execute(f"SELECT COUNT(*), MIN(ts_utc), MAX(ts_utc) FROM {table}").fetchone()
             typer.echo(f"{table:18} {n:>9} rows  {lo} -> {hi}")
 

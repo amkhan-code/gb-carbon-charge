@@ -3,6 +3,9 @@
 The model is refit every `refit_days`. Each fold trains only on target days whose
 labels were complete before the fold's first forecast was issued, then forecasts the
 next `refit_days` days with that frozen model.
+
+Two targets: carbon intensity, and the realised Market Index price. The price model predicts
+the *basis* (realised minus day-ahead price) and adds it back to the known day-ahead price.
 """
 
 from dataclasses import dataclass
@@ -15,8 +18,24 @@ from carbon_charge import config, db
 from carbon_charge.features.build import FeatureSet, build
 from carbon_charge.models import baselines, lgbm
 
-# Models whose training set excludes these feature sources.
-MODEL_EXCLUDES = {"lgbm": (), "lgbm_noweather": ("weather_forecast",)}
+PRICE_SOURCES = ("price_day_ahead", "price_mid")
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    name: str
+    target: str  # "ci" or "price"
+    exclude_sources: tuple[str, ...] = ()
+    params: tuple = ()  # LightGBM overrides as ((key, value), ...)
+
+
+# Layer 1 models exclude every price feature, so their forecasts do not change in Layer 2.
+MODELS = [
+    ModelSpec("lgbm", "ci", PRICE_SOURCES),
+    ModelSpec("lgbm_noweather", "ci", ("weather_forecast", *PRICE_SOURCES)),
+    ModelSpec("lgbm_price", "ci"),
+    ModelSpec("price_lgbm", "price", params=tuple(lgbm.PRICE_PARAMS.items())),
+]
 
 # Labels for day D_train are complete at D_train+1 00:00 (+ publication lag); the first
 # forecast of a fold is issued at 11:00 on (test_start - 1). So the last usable training
@@ -41,6 +60,10 @@ def make_folds(start: date, end: date, refit_days: int) -> list[Fold]:
     return folds
 
 
+def _long(s: pd.Series, model: str, col: str) -> pd.DataFrame:
+    return s.dropna().rename(col).rename_axis("ts_utc").reset_index().assign(model=model)
+
+
 def run(
     con: duckdb.DuckDBPyConnection,
     start: date,
@@ -48,41 +71,60 @@ def run(
     refit_days: int = 14,
     history_start: date = config.HISTORY_START,
     fs: FeatureSet | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Returns (forecasts long: ts_utc/model/forecast_gco2_kwh, folds table)."""
+    models: list[ModelSpec] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Returns (carbon forecasts, price forecasts, folds). Forecast frames are long: ts_utc/model/value."""
     fs = fs or build(con, history_start, end)
-    m = fs.meta
-    day = m["settlement_date"].dt.date
-    out: list[pd.DataFrame] = []
+    models = models or MODELS
+    day = fs.meta["settlement_date"].dt.date
+    ci_out: list[pd.DataFrame] = []
+    price_out: list[pd.DataFrame] = []
     fold_rows = []
+    # Price target: basis = realised - day-ahead. Rows without a day-ahead price cannot be used.
+    basis = fs.y_price - fs.X["da_price"]
 
     for fold in make_folds(start, end, refit_days):
-        train_mask = (day <= fold.train_end).to_numpy() & fs.y.notna().to_numpy()
+        in_train = (day <= fold.train_end).to_numpy()
         test_mask = ((day >= fold.test_start) & (day <= fold.test_end)).to_numpy()
-        if train_mask.sum() < MIN_TRAIN_ROWS:
-            raise ValueError(f"fold {fold}: only {train_mask.sum()} training rows")
-        for name, excl in MODEL_EXCLUDES.items():
-            cols = lgbm.feature_columns(fs.sources, excl)
-            booster = lgbm.fit(fs.X.loc[train_mask, cols], fs.y[train_mask])
-            pred = lgbm.predict(booster, fs.X.loc[test_mask, cols])
-            out.append(pred.rename("forecast_gco2_kwh").rename_axis("ts_utc").reset_index().assign(model=name))
-        fold_rows.append({**fold.__dict__, "n_train": int(train_mask.sum()), "n_test": int(test_mask.sum())})
+        n_train = {}
+        for spec in models:
+            y = fs.y if spec.target == "ci" else basis
+            train_mask = in_train & y.notna().to_numpy()
+            if train_mask.sum() < MIN_TRAIN_ROWS:
+                raise ValueError(f"fold {fold}: only {train_mask.sum()} training rows for {spec.name}")
+            cols = lgbm.feature_columns(fs.sources, spec.exclude_sources)
+            booster = lgbm.fit(fs.X.loc[train_mask, cols], y[train_mask], params=dict(spec.params))
+            pred = lgbm.predict(booster, fs.X.loc[test_mask, cols], clip_low=0 if spec.target == "ci" else None)
+            if spec.target == "ci":
+                ci_out.append(_long(pred, spec.name, "forecast_gco2_kwh"))
+            else:
+                price_out.append(_long(pred + fs.X.loc[test_mask, "da_price"], spec.name, "forecast_gbp_mwh"))
+            n_train[spec.name] = int(train_mask.sum())
+        fold_rows.append({**fold.__dict__, "n_train": n_train.get("lgbm", max(n_train.values())),
+                          "n_test": int(test_mask.sum())})
 
-    base = {
+    in_test = ((day >= start) & (day <= end)).to_numpy()
+    ci_base = {
         "yesterday": baselines.yesterday(fs),
         "last_week": baselines.last_week(fs),
         "neso_logged": baselines.neso_logged(con, fs),
         "neso_latest_revision": baselines.neso_latest_revision(con, fs),
     }
-    in_test = ((day >= start) & (day <= end)).to_numpy()
-    for name, s in base.items():
-        s = s[in_test].dropna()
-        out.append(s.rename("forecast_gco2_kwh").rename_axis("ts_utc").reset_index().assign(model=name))
+    price_base = {
+        "price_da": baselines.price_day_ahead(fs),
+        "price_yesterday": baselines.price_yesterday(fs),
+        "price_last_week": baselines.price_last_week(fs),
+        "price_da_basis7d": baselines.price_da_plus_basis(fs),
+    }
+    ci_out += [_long(s[in_test], n, "forecast_gco2_kwh") for n, s in ci_base.items()]
+    price_out += [_long(s[in_test], n, "forecast_gbp_mwh") for n, s in price_base.items()]
 
-    forecasts = pd.concat(out, ignore_index=True)[["ts_utc", "model", "forecast_gco2_kwh"]]
-    return forecasts, pd.DataFrame(fold_rows)
+    ci = pd.concat(ci_out, ignore_index=True)[["ts_utc", "model", "forecast_gco2_kwh"]]
+    pr = pd.concat(price_out, ignore_index=True)[["ts_utc", "model", "forecast_gbp_mwh"]]
+    return ci, pr, pd.DataFrame(fold_rows)
 
 
-def save(con: duckdb.DuckDBPyConnection, forecasts: pd.DataFrame) -> int:
+def save(con: duckdb.DuckDBPyConnection, ci: pd.DataFrame, price: pd.DataFrame) -> int:
     con.execute("DELETE FROM backtest_forecast")
-    return db.upsert(con, "backtest_forecast", forecasts)
+    con.execute("DELETE FROM backtest_price_forecast")
+    return db.upsert(con, "backtest_forecast", ci) + db.upsert(con, "backtest_price_forecast", price)

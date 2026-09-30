@@ -29,6 +29,12 @@ def fit(X: pd.DataFrame, y: pd.Series, params: dict | None = None, rounds: int =
     return lgb.train({**PARAMS, **(params or {})}, lgb.Dataset(X, y), num_boost_round=rounds)
 
 
-def predict(model: lgb.Booster, X: pd.DataFrame) -> pd.Series:
-    # Carbon intensity cannot be negative.
-    return pd.Series(np.clip(model.predict(X), 0, None), index=X.index)
+def predict(model: lgb.Booster, X: pd.DataFrame, clip_low: float | None = 0) -> pd.Series:
+    # Carbon intensity cannot be negative; prices can, so they pass clip_low=None.
+    pred = model.predict(X)
+    return pd.Series(pred if clip_low is None else np.clip(pred, clip_low, None), index=X.index)
+
+
+# The realised price has heavy spikes; the median (L1) objective is robust to them and matches
+# the MAE we report. Chosen before looking at test-period results.
+PRICE_PARAMS = {"objective": "regression_l1"}
