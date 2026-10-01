@@ -9,7 +9,8 @@ from carbon_charge import config, db
 from carbon_charge import figures as figures_mod
 from carbon_charge import report as report_mod
 from carbon_charge.evaluation import backtest as backtest_mod
-from carbon_charge.ingest import carbon_intensity, demand_forecast, prices, weather
+from carbon_charge.evaluation import experiment as experiment_mod
+from carbon_charge.ingest import carbon_intensity, demand_forecast, prices, weather, wind
 from carbon_charge.timeutils import UTC
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -69,6 +70,14 @@ def ingest_prices(
         typer.echo(f"price_mid: {prices.ingest_mid(con, a, b)} rows")
 
 
+@ingest_app.command("wind")
+def ingest_wind() -> None:
+    """NESO national day-ahead wind forecast, every vintage with its issue time."""
+    with db.connect() as con:
+        n, rejected = wind.ingest(con)
+    typer.echo(f"wind_forecast: {n} rows, {len(rejected)} rejected")
+
+
 @ingest_app.command("all")
 def ingest_all() -> None:
     """Run every ingester over the full default history."""
@@ -76,6 +85,7 @@ def ingest_all() -> None:
     ingest_demand()
     ingest_weather(start=None, end=None)
     ingest_prices(start=None, end=None)
+    ingest_wind()
 
 
 @app.command("log-forecast")
@@ -88,6 +98,19 @@ def log_forecast(
         return
     with db.connect() as con:
         typer.echo(f"ci_forecast_log: {carbon_intensity.log_forward_forecast(con)} rows")
+
+
+@app.command("log-wind")
+def log_wind(out_dir: Path = typer.Option(..., help="Write the snapshot CSV here.")) -> None:
+    """Snapshot NESO's live day-ahead wind forecast with its refresh time as the issue time."""
+    typer.echo(f"wrote {wind.write_live_csv(out_dir)}")
+
+
+@app.command("import-wind")
+def import_wind(csv_dir: Path = typer.Argument(..., help="Directory of wind snapshot CSVs.")) -> None:
+    """Load wind snapshot CSVs (a checkout of the data branch) into DuckDB."""
+    with db.connect() as con:
+        typer.echo(f"wind_forecast: {wind.import_csvs(con, csv_dir)} rows")
 
 
 @app.command("import-forecasts")
@@ -117,6 +140,22 @@ def backtest(
                    f"{backtest_mod.save(con, ci, price)} saved")
     config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     folds.to_csv(config.REPORTS_DIR / "backtest_folds.csv", index=False)
+
+
+@app.command()
+def experiment(
+    start: str = typer.Option("2024-07-01", help="First target day (use a DEVELOPMENT window, not the test period)."),
+    end: str = typer.Option("2024-12-31", help="Last target day."),
+    refit_days: int = typer.Option(14),
+) -> None:
+    """Run the pre-declared model experiments and score them on night ordering. Writes reports/experiments/."""
+    with db.connect(read_only=True) as con:
+        out = experiment_mod.run(con, date.fromisoformat(start), date.fromisoformat(end), refit_days)
+    d = config.REPORTS_DIR / "experiments" / f"{start}_{end}"
+    d.mkdir(parents=True, exist_ok=True)
+    for name, df in out.items():
+        df.to_csv(d / f"{name}.csv", index=False)
+        typer.echo(f"\n== {name}\n{df.round(3).to_string(index=False)}")
 
 
 @app.command()
@@ -154,7 +193,7 @@ def report() -> None:
 def status() -> None:
     """Row counts and time coverage per table."""
     with db.connect(read_only=True) as con:
-        for table in ("ci_history", "ci_forecast_log", "demand_forecast", "weather_forecast", "price_day_ahead", "price_mid"):
+        for table in ("ci_history", "ci_forecast_log", "demand_forecast", "weather_forecast", "price_day_ahead", "price_mid", "wind_forecast"):
             n, lo, hi = con.execute(f"SELECT COUNT(*), MIN(ts_utc), MAX(ts_utc) FROM {table}").fetchone()
             typer.echo(f"{table:18} {n:>9} rows  {lo} -> {hi}")
 

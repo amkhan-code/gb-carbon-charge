@@ -1,10 +1,12 @@
-name: Log carbon intensity forecast
+name: Log day-ahead wind forecast
 
-# 07:30 UTC is 07:30 GMT / 08:30 BST: comfortably before the 11:00 UK cutoff, even
-# allowing for GitHub's scheduled-run delays (often 5-30 min, occasionally more).
+# NESO refreshes this file around 08:40 UTC. 09:15 UTC runs after that and still leaves 45 minutes
+# before the 10:00 UTC cutoff (summer). The issue time recorded is NESO's own last-modified time, so a
+# late run is harmless unless NESO refreshed again after the cutoff, in which case the snapshot is
+# correctly ignored by the leakage gate.
 on:
   schedule:
-    - cron: "30 7 * * *"
+    - cron: "15 9 * * *"
   workflow_dispatch:
 
 permissions:
@@ -23,8 +25,8 @@ jobs:
 
       - uses: astral-sh/setup-uv@v7
 
-      - name: Snapshot forward forecast to CSV
-        run: uv run --python 3.12 carbon-charge log-forecast --out-dir "$RUNNER_TEMP/snapshot"
+      - name: Snapshot day-ahead wind forecast to CSV
+        run: uv run --python 3.12 carbon-charge log-wind --out-dir "$RUNNER_TEMP/snapshot"
 
       - name: Commit snapshot to the data branch
         run: |
@@ -43,14 +45,14 @@ jobs:
           fi
 
           year=$(date -u +%Y)
-          mkdir -p "$RUNNER_TEMP/data/ci_forecast/$year"
-          cp "$RUNNER_TEMP"/snapshot/ci_forecast_*.csv "$RUNNER_TEMP/data/ci_forecast/$year/"
+          mkdir -p "$RUNNER_TEMP/data/wind_forecast/$year"
+          cp "$RUNNER_TEMP"/snapshot/wind_forecast_*.csv "$RUNNER_TEMP/data/wind_forecast/$year/"
 
           cd "$RUNNER_TEMP/data"
-          git add ci_forecast
+          git add wind_forecast
           if git diff --cached --quiet; then
             echo "Nothing new to commit."
           else
-            git commit -m "Forecast snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+            git commit -m "Wind forecast snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
             git push origin HEAD:data
           fi

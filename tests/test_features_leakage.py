@@ -74,6 +74,10 @@ def _poison(con, cutoff: pd.Timestamp) -> None:
         "UPDATE price_mid SET price_gbp_mwh = 1e6 WHERE ts_utc + INTERVAL 30 MINUTE + "
         f"INTERVAL {config.MID_LAG_MINUTES} MINUTE > ?", [cutoff]
     )
+    con.execute(
+        "INSERT INTO wind_forecast SELECT ts_utc, ? + INTERVAL 1 MINUTE, settlement_date, settlement_period, "
+        "capacity_mw, 1e6, fetched_at_utc FROM wind_forecast WHERE issued_at_utc <= ?", [cutoff, cutoff]
+    )
     cols = ", ".join(f"{c} = 1e6" for c in config.WEATHER_VARIABLES.values())
     con.execute(
         f"UPDATE weather_forecast SET {cols} WHERE issued_at_utc + INTERVAL {config.WEATHER_RUN_LAG_HOURS} HOUR > ?",
@@ -134,3 +138,18 @@ def test_realised_price_lags_follow_the_same_cutoff_rule_as_carbon(fs):
 def test_labels_are_not_features(fs):
     assert not [c for c in fs.X.columns if "price_gbp_mwh" in c]
     assert not any(fs.X[c].equals(fs.y_price) for c in fs.X.columns)
+
+
+def test_wind_forecast_issued_after_cutoff_is_never_used(con):
+    day = date(2024, 4, 3)
+    ok = build(con, day, day)
+    assert ok.X["wind_fc_mw"].notna().all() and (ok.avail["wind_fc_mw"] <= ok.meta["cutoff_utc"]).all()
+    # NESO's file now holds forecasts issued on the target day itself (DATA_ISSUES WIND-1): must be dropped.
+    con.execute("UPDATE wind_forecast SET issued_at_utc = CAST(? AS TIMESTAMP) + INTERVAL 9 HOUR WHERE settlement_date = ?",
+                [day, day])
+    late = build(con, day, day)
+    assert late.X["wind_fc_mw"].isna().all() and late.X["wind_fc_share"].isna().all()
+    # An earlier vintage for the same period is used when a later one is too late.
+    con.execute("INSERT INTO wind_forecast SELECT ts_utc, issued_at_utc - INTERVAL 2 DAY, settlement_date, "
+                "settlement_period, capacity_mw, 123.0, fetched_at_utc FROM wind_forecast WHERE settlement_date = ?", [day])
+    assert (build(con, day, day).X["wind_fc_mw"] == 123.0).all()

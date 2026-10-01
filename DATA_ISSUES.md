@@ -164,3 +164,44 @@ Source: "Day Ahead Half Hourly Demand Forecast Performance". Chosen because it h
 - MID is a within-day traded index published after delivery. It can only be a lagged feature or an
   outturn for scoring, never a value known at the cutoff for the target day. Day-ahead vs MID: MAE
   10-15 GBP/MWh, correlation 0.73-0.89 by year.
+
+## NESO day-ahead wind forecast
+
+### WIND-1: most recent months have no usable day-ahead vintage
+- The "Historic Day Ahead Wind Forecasts" file stores one vintage per target day with its issue time.
+  For 2026-05-01 onward every vintage was issued on the target day itself (median 22.8 h after the
+  11:00 D-1 cutoff), so zero of 153 days (May-Sep 2026) pass the leakage gate. Earlier: 2023 126 days
+  and 2025 50 days were back-filled long after delivery (issued after the target day started).
+  Overall 1,012 of 1,370 days (74%) are usable. By quarter: 2024 ~99%, 2025 Q1-Q3 96-100% but Q4 50%,
+  2026 Q1 80%, Q2 25%, Q3 0%; 2023 Q3 0%. Over the 2025-01 to 2026-09 test period about 65% of rows have wind.
+- Handling: every vintage is stored with its true issue time; the feature builder keeps only vintages
+  issued by the cutoff, so unusable days get NULL wind features (LightGBM handles this). Evaluating a
+  wind feature over May-Sep 2026 therefore says nothing about wind.
+- Status: partly fixable going forward: see WIND-4.
+
+### WIND-2: several vintages for the same target period on 7 days
+- 2023-10-29, 2024-10-27, 2025-10-26 (50-period days) and 2026-07-29/30, 2026-08-01/02 carry more than one
+  vintage (including a re-issue on 2026-08-18). Kept via a (target, issue time) key; the builder uses the
+  latest vintage issued by the cutoff.
+
+### WIND-3: Forecast_Timestamp has no timezone label
+- Read as UTC, the conservative choice for a cutoff rule. Typical usable vintage is issued about 08:49,
+  a median 105 minutes before the cutoff (minimum 15 minutes).
+
+### WIND-4: the live feed is not being captured
+- NESO's "Day Ahead Wind Forecast" (tomorrow's 48 periods) refreshes around 08:40 UTC daily and has no issue
+  time column. The carbon-intensity logger runs at 07:30 UTC, before that refresh. A snapshot after ~09:00 UTC
+  using the resource's `last_modified` as the issue time would fill the gap from today onward.
+
+### WIND-5: installed capacity grows over time
+- Capacity is 15.9 GW (2022) to 24.3 GW (2026), so wind MW is not comparable across years. The builder adds
+  forecast as a share of capacity alongside MW. Datetime_GMT matches the UTC period start for every row.
+
+### WIND-6: a model trained with wind degrades badly when wind is missing at prediction time
+- 2025-01 to 2026-09 test period, wind available on 64% of rows. Where wind WAS available the wind model beat
+  the baseline by 3% (MAE 17.45 vs 18.01; shape error -5%). Where it was missing it was 16% WORSE (23.65 vs
+  20.31), because the missing months (May-Sep 2026, and holes in 2023-25) were seen in training with real values.
+  Net effect on the whole test period: slightly worse (19.66 vs 18.83). On the 2024 development window, where
+  coverage was 99%, the gain looked like 10% (16.6 vs 18.4); the gain does not generalise at that size.
+- Implication: a wind feature is only safe if it is reliably present at prediction time (live capture, WIND-4)
+  or the pipeline falls back to a no-wind model on days it is missing. Not promoted into the standard models.

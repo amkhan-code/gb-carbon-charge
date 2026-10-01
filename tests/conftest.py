@@ -36,6 +36,17 @@ def populate_prices(con, rng) -> None:
     db.upsert(con, "price_mid", mid)
 
 
+def populate_wind(con, rng) -> None:
+    ts = _ts(START, END, "30min")
+    w = add_settlement_columns(pd.DataFrame({"ts_utc": ts}))
+    cut = av.cutoffs(pd.to_datetime(w["settlement_date"]).dt.date)
+    w["issued_at_utc"] = cut - pd.Timedelta(hours=2)
+    w["capacity_mw"] = 20000.0
+    w["wind_forecast_mw"] = rng.uniform(1000, 15000, len(ts))
+    w["fetched_at_utc"] = pd.Timestamp("2024-06-01")
+    db.upsert(con, "wind_forecast", w)
+
+
 def populate(con) -> None:
     rng = np.random.default_rng(0)
     ts = _ts(START, END, "30min")
@@ -67,6 +78,7 @@ def populate(con) -> None:
     w["fetched_at_utc"] = pd.Timestamp("2024-06-01")
     db.upsert(con, "weather_forecast", w)
     populate_prices(con, rng)
+    populate_wind(con, rng)
 
 
 @pytest.fixture()

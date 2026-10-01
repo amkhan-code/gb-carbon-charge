@@ -81,3 +81,8 @@ MID_PROVIDER = "APXMIDP"
 DAY_AHEAD_PRICE_PUBLISHED_UTC = time(10, 0)
 # MID prices are usable this long after the END of their period (assumption, like CI actuals).
 MID_LAG_MINUTES = 60
+
+
+# --- NESO day-ahead wind forecast -----------------------------------------------
+NESO_WIND_HISTORY_RESOURCE_ID = "7524ec65-f782-4258-aaf8-5b926c17b966"  # "Historic Day Ahead Wind Forecasts"
+NESO_WIND_LIVE_RESOURCE_ID = "b2f03146-f05d-4824-a663-3a4f36090c71"  # "Day Ahead Wind Forecast" (tomorrow, refreshed ~08:40 UTC)

@@ -1,0 +1,4 @@
+model,vs,shape_mae_diff,share_of_nights_better
+lgbm_wind,lgbm_price,-1.2310987769124295,0.6284153005464481
+lgbm_night,lgbm_price,-1.149431783827885,0.5901639344262295
+lgbm_both,lgbm_price,-1.3994207738579671,0.5683060109289617

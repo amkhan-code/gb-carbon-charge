@@ -79,6 +79,19 @@ CREATE TABLE IF NOT EXISTS price_mid (
     fetched_at_utc TIMESTAMP NOT NULL
 );
 
+-- NESO national day-ahead wind forecast. One row per (target period, vintage); issue time is the
+-- file's Forecast_Timestamp, read as UTC (DATA_ISSUES WIND-3).
+CREATE TABLE IF NOT EXISTS wind_forecast (
+    ts_utc TIMESTAMP NOT NULL,
+    issued_at_utc TIMESTAMP NOT NULL,
+    settlement_date DATE NOT NULL,
+    settlement_period SMALLINT NOT NULL,
+    capacity_mw DOUBLE,
+    wind_forecast_mw DOUBLE,
+    fetched_at_utc TIMESTAMP NOT NULL,
+    PRIMARY KEY (ts_utc, issued_at_utc)
+);
+
 -- Out-of-sample forecasts of the realised Market Index price (GBP/MWh), same layout as below.
 CREATE TABLE IF NOT EXISTS backtest_price_forecast (
     ts_utc TIMESTAMP NOT NULL,

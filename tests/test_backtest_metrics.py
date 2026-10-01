@@ -113,3 +113,41 @@ def test_ranking_overlap_perfect_reversed_and_random_baseline():
     assert out.loc[("perfect", 3), "mean_overlap"] == 1.0
     assert out.loc[("reversed", 3), "mean_overlap"] == 0.0
     assert out.loc[("random", 3), "mean_overlap"] == pytest.approx(3 / 26)
+
+
+def test_night_labels_are_window_only_complete_and_sum_to_zero(con):
+    fs = build(con, date(2024, 3, 25), date(2024, 4, 10))
+    night, dev = backtest.night_labels(fs)
+    h = fs.meta["local_hour"]
+    in_window = (h >= 18) | (h < 7)
+    assert night.notna().equals(in_window)
+    assert dev[~in_window].isna().all()
+    # Each complete night's deviations sum to zero by construction.
+    per_night = dev.groupby(night).sum().dropna()
+    assert len(per_night) > 10 and per_night.abs().max() < 1e-6
+    # The spring clock-change night has 24 slots, the autumn 28 elsewhere, normal nights 26.
+    sizes = dev.groupby(night).count()
+    assert sizes[pd.Timestamp("2024-03-30")] == 24 and sizes[pd.Timestamp("2024-04-02")] == 26
+    # The first night in the window starts the evening before data begins: its evening half is missing.
+    assert pd.Timestamp("2024-03-24") not in sizes.index or sizes[pd.Timestamp("2024-03-24")] == 0
+    # Labels use the actual (a label), the night mean is not a feature.
+    assert not [c for c in fs.X.columns if "night" in c]
+
+
+def test_night_model_uses_base_level_and_predicts_only_window_rows(con, monkeypatch):
+    monkeypatch.setattr(backtest, "MIN_TRAIN_ROWS", 100)
+    real_fit = lgbm.fit
+    monkeypatch.setattr(lgbm, "fit", lambda X, y, **k: real_fit(X, y, rounds=10, **k))
+    fs = build(con, date(2024, 2, 1), date(2024, 4, 20))
+    ci, _, _ = backtest.run(con, date(2024, 3, 25), date(2024, 4, 15), 7, fs=fs, models=backtest.EXPERIMENTS)
+    night_fc = ci[ci["model"] == "lgbm_night"].set_index("ts_utc")["forecast_gco2_kwh"]
+    base = ci[ci["model"] == "lgbm_price"].set_index("ts_utc")["forecast_gco2_kwh"]
+    h = fs.meta.loc[night_fc.index, "local_hour"]
+    assert ((h >= 18) | (h < 7)).all()  # window rows only
+    night, _ = backtest.night_labels(fs)
+    # Per night, the combined forecast has exactly the base model's mean level.
+    nid = night.reindex(night_fc.index)
+    lvl = night_fc.groupby(nid).mean()
+    base_lvl = base.reindex(night_fc.index).groupby(nid).mean()
+    pd.testing.assert_series_equal(lvl, base_lvl, check_names=False, atol=1e-6, rtol=0)
+    assert {"lgbm_wind", "lgbm_both"} <= set(ci["model"])

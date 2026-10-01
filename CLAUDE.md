@@ -106,3 +106,16 @@ the charging optimiser reports cost-only, carbon-only and a weighted trade-off.
   lam=0 is cost only, lam=None is carbon only (identical to Layer 1).
 - Same rules as Layer 1: rolling-origin backtests, tests for clock-change days and leakage,
   every data problem logged in `DATA_ISSUES.md`. Pause for inspection after ingestion.
+
+## Model experiments
+
+- Try model changes on a DEVELOPMENT window (`carbon-charge experiment`, default 2024-07-01 to
+  2024-12-31) and compare on the same nights with paired block-bootstrap intervals. Run the test period
+  (2025-01-01 onward) once for variants declared beforehand, and report every variant, not just winners.
+- Experimental specs live in `evaluation/backtest.py: EXPERIMENTS`. Standard models (`MODELS`) must keep
+  excluding wind features until an experiment is deliberately promoted.
+- NESO day-ahead wind forecast (`wind_forecast` table, `wind_fc_mw`/`wind_fc_share` features): usable only
+  when the vintage was issued by the cutoff. Its history has holes (DATA_ISSUES WIND-1); live snapshots come
+  from `log-wind` / `.github/workflows/log-wind-forecast.yml`.
+- The night-deviation target (`ci_night`) predicts each slot's deviation from its 18:00-07:00 night mean
+  and adds the base model's night level back, so forecasts remain valid absolute values.

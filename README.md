@@ -85,13 +85,15 @@ docker compose --profile test run --rm tests
 
 | Command | What it does |
 |---|---|
-| `ingest carbon / demand / weather / prices / all` | Pull source data into DuckDB |
+| `ingest carbon / demand / weather / prices / wind / all` | Pull source data into DuckDB |
 | `log-forecast [--out-dir DIR]` | Snapshot NESO's forward forecast with its issue time |
 | `import-forecasts DIR` | Load logger CSVs (a checkout of the `data` branch) into DuckDB |
 | `backtest` | Rolling-origin backtest of the carbon and price models; stores out-of-sample forecasts |
 | `evaluate` | MAE/RMSE by season and time of day, slot-ranking accuracy |
 | `optimise` | Four charging strategies over the backtest: carbon, cost-only and the cost/carbon frontier, incl. sensitivity set |
-| `report` | evaluate + optimise + write `reports/RESULTS.md` |
+| `report` | evaluate + optimise + write `reports/RESULTS.md` and the charts |
+| `experiment` | Pre-declared model variants (wind forecast, night-ordering target) scored on night ordering, with paired comparisons |
+| `log-wind --out-dir DIR` / `import-wind DIR` | Snapshot NESO's live day-ahead wind forecast, and load snapshots into DuckDB |
 | `status` | Row counts and coverage per table |
 
 ## NESO's own forecast as a baseline

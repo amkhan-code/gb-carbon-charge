@@ -25,7 +25,7 @@ from carbon_charge.timeutils import (
 )
 
 # Every feature declares one of these sources.
-ALLOWED_SOURCES = {"calendar", "ci_actual", "demand_forecast", "weather_forecast", "price_day_ahead", "price_mid"}
+ALLOWED_SOURCES = {"calendar", "ci_actual", "demand_forecast", "weather_forecast", "price_day_ahead", "price_mid", "wind_forecast"}
 
 WEATHER_ROLE_AGGREGATES = {
     # role -> (variable column, aggregate feature name)
@@ -169,6 +169,20 @@ def _weather(b: _Builder, con: duckdb.DuckDBPyConnection) -> None:
         b.add(name, "weather_forecast", pd.concat([b.cols[n] for n in names], axis=1).mean(axis=1), avail)
 
 
+def _wind(b: _Builder, con: duckdb.DuckDBPyConnection) -> None:
+    """NESO's national wind forecast: the latest vintage issued by the cutoff, else missing."""
+    m = b.meta
+    w = con.execute(
+        "SELECT ts_utc, issued_at_utc, capacity_mw, wind_forecast_mw FROM wind_forecast WHERE ts_utc BETWEEN ? AND ?",
+        [m.index.min(), m.index.max()],
+    ).df()
+    w = w.merge(m[["cutoff_utc"]], left_on="ts_utc", right_index=True)
+    w = w[w["issued_at_utc"] <= w["cutoff_utc"]].sort_values("issued_at_utc").drop_duplicates("ts_utc", keep="last")
+    w = w.set_index("ts_utc").reindex(m.index)
+    b.add("wind_fc_mw", "wind_forecast", w["wind_forecast_mw"], w["issued_at_utc"])
+    b.add("wind_fc_share", "wind_forecast", w["wind_forecast_mw"] / w["capacity_mw"], w["issued_at_utc"])
+
+
 def _prices(b: _Builder, con: duckdb.DuckDBPyConnection) -> tuple[pd.DataFrame, pd.Series]:
     """Day-ahead price features (known by 10:00 UTC on D-1) and lagged realised (Market Index) prices.
 
@@ -226,6 +240,7 @@ def build(con: duckdb.DuckDBPyConnection, start: date, end: date) -> FeatureSet:
     _demand(b, con)
     _weather(b, con)
     mid, _ = _prices(b, con)
+    _wind(b, con)
     y = ci.set_index("ts_utc")["actual_gco2_kwh"].reindex(meta.index).rename("actual_gco2_kwh")
     return FeatureSet(
         X=pd.DataFrame(b.cols),

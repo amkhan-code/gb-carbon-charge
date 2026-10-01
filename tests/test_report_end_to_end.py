@@ -39,8 +39,11 @@ def test_day_ahead_baseline_is_exactly_the_da_price(con, reports):
 def test_layer1_models_unchanged_by_price_features(con):
     from carbon_charge.features.build import build
     fs = build(con, date(2024, 2, 1), date(2024, 4, 15))
-    cols = lgbm.feature_columns(fs.sources, backtest.PRICE_SOURCES)
-    assert cols and not [c for c in cols if c.startswith(("da_", "mid_", "basis_"))]
+    for spec in backtest.MODELS:
+        if spec.name in ("lgbm", "lgbm_noweather"):
+            cols = lgbm.feature_columns(fs.sources, spec.exclude_sources)
+            assert cols and not [c for c in cols if c.startswith(("da_", "mid_", "basis_", "wind_fc"))], spec.name
+        assert not [c for c in lgbm.feature_columns(fs.sources, spec.exclude_sources) if c.startswith("wind_fc")], spec.name
 
 
 def test_blend_frontier_and_render(reports):
@@ -60,3 +63,18 @@ def test_charts_are_written_and_embedded(con, reports):
         assert (config.REPORTS_DIR / "figures" / n).stat().st_size > 5000
     text = report.render()
     assert "figures/gap_captured.png" in text and "figures/cost_carbon_frontier.png" in text
+
+
+def test_experiment_harness_returns_paired_comparisons_on_synthetic_data(con, monkeypatch):
+    from carbon_charge.evaluation import experiment
+
+    monkeypatch.setattr(backtest, "MIN_TRAIN_ROWS", 100)
+    real_fit = lgbm.fit
+    monkeypatch.setattr(lgbm, "fit", lambda X, y, **k: real_fit(X, y, rounds=10, **k))
+    out = experiment.run(con, date(2024, 3, 25), date(2024, 4, 15), 7)
+    assert set(out["accuracy"]["model"]) == {"lgbm_price", "lgbm_wind", "lgbm_night", "lgbm_both"}
+    assert out["accuracy"]["n"].nunique() == 1  # same rows for every candidate
+    assert set(out["paired_gap"]["model"]) == {"lgbm_wind", "lgbm_night", "lgbm_both"}
+    assert (out["paired_gap"]["vs"] == "lgbm_price").all()
+    assert out["accuracy_by_wind_availability"]["wind_available"].all()  # synthetic wind is always present
+    assert (out["paired_gap"]["ci_low"] <= out["paired_gap"]["ci_high"]).all()
