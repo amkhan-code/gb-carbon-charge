@@ -205,3 +205,14 @@ Source: "Day Ahead Half Hourly Demand Forecast Performance". Chosen because it h
   coverage was 99%, the gain looked like 10% (16.6 vs 18.4); the gain does not generalise at that size.
 - Implication: a wind feature is only safe if it is reliably present at prediction time (live capture, WIND-4)
   or the pipeline falls back to a no-wind model on days it is missing. Not promoted into the standard models.
+
+### X-5: lagged baselines have no value for periods that do not exist on a clock-change day
+- Lags are matched on (settlement date, period). A 48-period day has periods 47-48 that the 46-period spring day
+  lacks, and 49-50 on the 50-period autumn day exist nowhere else. So "yesterday" and "last week" are missing for
+  those periods: 2025-04-01 and 2026-03-31 (yesterday falls back to the spring day), 2025-04-06 and 2026-04-05
+  (last week is the spring day), and 2025-10-26 (both, periods 49-50). That is 5 nights and 10 half-hours.
+- Handling: the nights are dropped from every comparison that uses those baselines, so all strategies are scored on
+  the same nights (631 of 636 for carbon, 627 for cost: 3 of the clock-change nights, 3 with no realised price, 3 with last
+  week's price missing). The LightGBM variants are not affected, and experiments use all 636.
+- Effect: conservative and small. A clock-time match (mapping a missing period to the nearest existing one) would
+  restore 5 nights but is a methodology change, so it has not been made.

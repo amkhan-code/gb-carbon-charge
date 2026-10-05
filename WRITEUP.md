@@ -2,8 +2,9 @@
 
 *Mostly no, and the reasons are more useful than the answer.*
 
-Results as of 1 October 2026. Backtest covers 1 January 2025 to 29 September 2026. Code, data log and
-every table: this repository (`reports/RESULTS.md` has the full set).
+Written 1 October 2026 from data downloaded on 30 September. The test period runs from 1 January 2025 to
+29 September 2026, the last complete day: 637 days, 636 charging nights and 30,574 half-hours (see "How the
+counts fit together"). Code, data log and every table: this repository (`reports/RESULTS.md` has the full set).
 
 ## The short version
 
@@ -42,7 +43,22 @@ cutoff is blanked out. Some consequences:
   tests fail when I deliberately broke the gate.
 
 Evaluation is a rolling backtest: refit every 14 days on the past only, forecast the next 14, never a random
-split. 631 nights, 21 months, all seasons.
+split. The test period is 636 charging nights over 21 months, covering every season.
+
+### How the counts fit together
+
+Different analyses use slightly different numbers of nights, because each keeps only the nights where every
+forecast it compares is complete. Nothing is hidden: the nights dropped are listed in `DATA_ISSUES.md` (X-5).
+
+| Analysis | Nights | Why |
+|---|---|---|
+| Test period | 636 | 637 days; a night starts in the evening and needs the next morning, so the last day gives no night |
+| Headline carbon comparison | 631 | 5 nights lost because a "yesterday" or "last week" baseline has no value for a period that does not exist on a clock-change day |
+| Cost and cost/carbon comparison | 627 | 9 nights lost: 3 of the clock-change cases (the other 2 involve only the "yesterday" baseline, which this comparison does not use), 3 with no realised price (no trading volume) and 3 where last week's price is missing |
+| Model experiments | 636 | compares only LightGBM variants, none of which has gaps |
+
+The forecast accuracy charts count half-hours instead: 30,574 in the period, 30,564 scored for carbon (10 lost to
+the same clock-change gaps) and 30,510 for price (64 lost to missing realised prices or baseline values).
 
 ## Results
 
@@ -57,7 +73,7 @@ Weather does most of the work: without it the error is 33. Adding price features
 ![Share of the possible saving captured](reports/figures/gap_captured.png)
 
 The headline metric is the share of the gap between an overnight timer and perfect foresight. LightGBM
-captures **34%** (95% interval 28 to 39%), or **40%** with price features. "Same as yesterday" is worse than
+captures **34%** (95% interval 28 to 39%), or **40%** with price features, over the 631 comparable nights. "Same as yesterday" is worse than
 just using the timer (-21%), and last week's pattern is indistinguishable from it.
 
 ![One typical night](reports/figures/sample_night.png)
@@ -79,7 +95,7 @@ the auction already contains almost everything predictable.
 
 ![Cost and carbon per night](reports/figures/cost_carbon_frontier.png)
 
-I planned on a blend of cost and carbon, with carbon valued at £0 to £2,500 per tonne. Planning on cost alone
+Over the 627 nights with complete prices I planned on a blend of cost and carbon, with carbon valued at £0 to £2,500 per tonne. Planning on cost alone
 emits about as much carbon as planning on the carbon forecast itself (913 g against 914 g per night), and a
 modest £250/t carbon price adds almost nothing to the bill while shaving a little more carbon.
 
