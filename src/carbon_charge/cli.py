@@ -7,6 +7,7 @@ import typer
 
 from carbon_charge import config, db
 from carbon_charge import figures as figures_mod
+from carbon_charge import results_store
 from carbon_charge import report as report_mod
 from carbon_charge.evaluation import backtest as backtest_mod
 from carbon_charge.evaluation import experiment as experiment_mod
@@ -177,6 +178,14 @@ def optimise() -> None:
     typer.echo(s[s["scenario"] == "default"].round(2).to_string(index=False))
 
 
+@app.command("export-results")
+def export_results() -> None:
+    """Load the CSV results and DATA_ISSUES.md into DuckDB tables for read-only serving (e.g. the MCP server)."""
+    with db.connect() as con:
+        for table, n in results_store.persist(con).items():
+            typer.echo(f"{table:18} {n:>6} rows")
+
+
 @app.command()
 def report() -> None:
     """Run evaluate + optimise and write reports/RESULTS.md."""
@@ -187,6 +196,7 @@ def report() -> None:
     path = config.REPORTS_DIR / "RESULTS.md"
     path.write_text(report_mod.render())
     typer.echo(f"wrote {path}")
+    export_results()
 
 
 @app.command()
