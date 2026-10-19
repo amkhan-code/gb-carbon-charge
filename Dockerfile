@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY src ./src
+COPY mcp_server ./mcp_server
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH=/app/.venv/bin:$PATH \
     CARBON_CHARGE_DATA_DIR=/data \

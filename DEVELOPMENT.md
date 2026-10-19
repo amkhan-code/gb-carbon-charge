@@ -98,3 +98,16 @@ Use `carbon-charge experiment` on a development window (default 2024-07-01 to 20
 the same nights with paired block-bootstrap intervals. Run the test period (2025-01-01 onward) once, for variants
 declared beforehand, and report all of them. Experimental model specs live in `evaluation/backtest.py`
 (`EXPERIMENTS`); the standard models (`MODELS`) are not changed until an experiment is deliberately promoted.
+
+## MCP server
+
+`mcp_server/` is a read-only [MCP](https://modelcontextprotocol.io) server over the results in DuckDB, so an
+agent can ask questions about the forecasts, charging strategies, metrics and data issues without touching the
+database. It is a separate package in the same uv workspace; see [`mcp_server/README.md`](mcp_server/README.md).
+Run `carbon-charge report` (or `export-results`) first: it writes the results tables the server reads.
+
+```bash
+uv sync --all-packages
+uv run python -m carbon_charge_mcp --db data/carbon.duckdb      # stdio
+uv run pytest mcp_server/tests
+```

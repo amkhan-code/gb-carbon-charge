@@ -13,5 +13,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - name: OpenMP runtime for LightGBM
         run: sudo apt-get update && sudo apt-get install -y libgomp1
-      - run: uv sync --python 3.12 --frozen
+      - run: uv sync --python 3.12 --frozen --all-packages
       - run: uv run pytest -q
+      - name: MCP server tests
+        run: uv run pytest -q mcp_server/tests

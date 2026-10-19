@@ -26,5 +26,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/carbon_charge"]
 
+[tool.uv.workspace]
+members = ["mcp_server"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

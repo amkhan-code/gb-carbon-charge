@@ -1,0 +1,32 @@
+[project]
+name = "gb-carbon-charge-mcp"
+version = "0.1.0"
+description = "Read-only MCP server over the gb-carbon-charge results"
+requires-python = ">=3.11"
+dependencies = [
+    "gb-carbon-charge",
+    # The 2.x middleware hook used for error shaping is marked provisional, so the minor version is pinned
+    # and a contract test fails loudly if its behaviour changes.
+    "mcp>=2.3,<2.4",
+    "pydantic>=2.7",
+    "duckdb>=1.0",
+]
+
+[project.scripts]
+gb-carbon-charge-mcp = "carbon_charge_mcp.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv.sources]
+gb-carbon-charge = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/carbon_charge_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
