@@ -78,7 +78,7 @@ def test_every_question_class_is_present_and_columns_are_exact(metrics):
 
 
 def test_every_arm_in_the_results_is_described_in_the_catalog(metrics):
-    known = {a.name for a in catalog.arms()} | {"random"}
+    known = {a.name for a in catalog.arms()}
     assert set(metrics["arm"]) <= known, set(metrics["arm"]) - known
     assert set(metrics["vs_arm"].dropna()) <= known
 

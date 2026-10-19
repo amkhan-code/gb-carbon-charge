@@ -68,8 +68,10 @@ def _ranking(df, target):
     df = df.assign(metric_name=df["k"].map(lambda k: f"overlap_top{int(k)}"))
     rows = []
     for r in df.to_dict("records"):
+        # The chance baseline appears in both the carbon and the price ranking: name them apart.
+        arm = f"random_{target}" if r["source"] == "random" else str(r["source"])
         rows.append({**{k: None for k in METRIC_COLUMNS}, "question_class": "slot_ranking", "target": target,
-                     "arm": str(r["source"]), "group_key": "slots_chosen", "group_value": str(int(r["k"])),
+                     "arm": arm, "group_key": "slots_chosen", "group_value": str(int(r["k"])),
                      "metric": r["metric_name"], "value": float(r["mean_overlap"]), "n": int(r["nights"]),
                      "n_unit": "nights", "unit": "fraction"})
     return rows

@@ -14,7 +14,7 @@ from carbon_charge.features.build import ALLOWED_SOURCES
 @dataclass(frozen=True)
 class Arm:
     name: str
-    kind: str  # carbon_model | price_model | baseline | reference | strategy | pipeline | experiment_variant
+    kind: str  # carbon_model | price_model | baseline | reference | strategy | pipeline | experiment_variant | chance
     target: str  # carbon | price | charging
     description: str
     uses_sources: tuple[str, ...] = ()
@@ -44,6 +44,8 @@ def arms() -> list[Arm]:
         Arm("price_da_basis7d", "baseline", "price", "Day-ahead price plus the trailing 7-day mean gap between realised and day-ahead prices.", ("price_day_ahead", "price_mid")),
         Arm("price_yesterday", "baseline", "price", "Realised price for the same period yesterday where published by the cutoff, else the day before.", ("price_mid",)),
         Arm("price_last_week", "baseline", "price", "Realised price for the same period 7 days earlier.", ("price_mid",)),
+        Arm("random_carbon", "chance", "carbon", "Chance level for slot ranking: the expected overlap if the slots were chosen at random.", (), "Not a forecast; only appears in slot_ranking."),
+        Arm("random_price", "chance", "price", "Chance level for price slot ranking: the expected overlap if the cheapest slots were chosen at random.", (), "Not a forecast; only appears in slot_ranking."),
         Arm("arrival", "strategy", "charging", "Charge at full power from plug-in time until the energy is delivered."),
         Arm("timer", "strategy", "charging", "Charge at full power from 00:00 UK time until the energy is delivered."),
         Arm("perfect", "strategy", "charging", "Charge in the slots that turn out to be best, using the actual values. An upper bound no real system can reach."),
