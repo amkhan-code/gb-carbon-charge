@@ -52,7 +52,7 @@ class ErrorPayload(BaseModel):
     valid_range: str | None = None
     did_you_mean: list[str] = Field(default_factory=list)
     hint: str | None = None
-    retryable: bool = False
+    retryable: bool = Field(default=False, description="True if correcting the arguments and calling again can succeed.")
     problems: list[FieldProblem] = Field(default_factory=list)
     correlation_id: str | None = None
 
@@ -65,7 +65,14 @@ class ToolFailure(Exception):
         self.payload = payload
 
 
+# "Retryable" means: correcting the arguments and calling again can succeed. It is true for every
+# argument-class error, false for faults and for things this server cannot provide at all.
+RETRYABLE = {"INVALID_ARGUMENT": True, "OUT_OF_RANGE": True, "UNKNOWN_NAME": True, "NOT_A_CHARGING_NIGHT": True,
+             "INCOMPLETE_DATA": True, "NOT_AVAILABLE": False, "INTERNAL": False}
+
+
 def failure(code: ErrorCode, message: str, **kw: Any) -> ToolFailure:
+    kw.setdefault("retryable", RETRYABLE[code])
     return ToolFailure(ErrorPayload(error_code=code, message=message, **kw))
 
 
@@ -164,7 +171,8 @@ def from_validation_text(text: str) -> ErrorPayload | None:
     return ErrorPayload(
         error_code="INVALID_ARGUMENT", message=first.message, field=first.field, got=first.got,
         allowed_values=first.allowed_values, did_you_mean=first.did_you_mean, problems=problems,
-        hint=FIELD_HINTS.get(first.field) or "Check the tool's input schema (tools/list) for the expected types.",
+        hint=FIELD_HINTS.get(first.field) or ("Choose one of the allowed values." if first.allowed_values
+                                              else "Check the tool's input schema (tools/list) for the expected types."),
         retryable=True)
 
 

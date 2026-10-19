@@ -82,3 +82,136 @@ class DatasetDescription(BaseModel):
     limitations: list[Limitation] | None = None
     data_issue_count: int
     provenance: Provenance
+
+
+class PeriodRow(BaseModel):
+    settlement_period: int
+    start_utc: datetime
+    start_local: datetime = Field(description="Start of the period in UK local time (clock-change days have 46 or 50 periods).")
+    actual: float | None
+    forecasts: dict[str, float | None] = Field(description="Forecast by arm; null where that arm has no value for the period.")
+
+
+class ModelDayScore(BaseModel):
+    model: str
+    n_periods: int = Field(description="Periods with both an actual and this arm's forecast.")
+    mae: float
+    rmse: float
+    bias: float = Field(description="Mean of forecast minus actual: positive means over-forecasting.")
+    forecast_mean: float
+    actual_mean: float
+    lowest_3_forecast: list[int] = Field(description="The 3 settlement periods this arm forecast lowest (greenest for carbon, cheapest for price).")
+    lowest_3_actual: list[int] = Field(description="The 3 periods that actually were lowest.")
+    overlap_top3: float = Field(description="Share of those 3 periods the forecast got right, 0 to 1.")
+
+
+class Unavailable(BaseModel):
+    model: str
+    reason: str
+
+
+class DayForecast(BaseModel):
+    date: date
+    target: Literal["carbon", "price"]
+    unit: str
+    periods_in_day: Literal[46, 48, 50]
+    periods_with_actuals: int
+    forecasts_issued_by_utc: datetime = Field(description="The cutoff (11:00 UK on the previous day): every forecast was made from data published by then.")
+    scores: list[ModelDayScore]
+    unavailable_models: list[Unavailable]
+    periods: list[PeriodRow] | None = Field(default=None, description="Only when detail='periods'.")
+    notes: list[str] = Field(default_factory=list)
+    provenance: Provenance
+
+
+class ChargeSlot(BaseModel):
+    start_utc: datetime
+    start_local: datetime = Field(description="UK local time. On the autumn clock-change night 01:00-02:00 happens twice, so use start_utc to tell the two apart.")
+    kwh: float
+
+
+class StrategyOutcome(BaseModel):
+    strategy: Literal["arrival", "timer", "forecast_optimised", "perfect_foresight"]
+    slots: list[ChargeSlot] = Field(description="The half-hours this strategy charges in, in time order.")
+    energy_kwh: float
+    carbon_g: float | None = Field(description="Carbon emitted, priced at actual carbon intensity. Null if actuals are incomplete.")
+    cost_gbp: float | None = Field(description="Wholesale cost at the realised market price. Null if prices are incomplete.")
+    objective_value: float = Field(description="The quantity the plan minimises, in the units of objective_unit. Lower is better.")
+    vs_timer_objective_pct: float | None = Field(description="Saving against the overnight timer on the objective. Negative means worse than the timer.")
+    vs_timer_carbon_pct: float | None
+    vs_timer_cost_pct: float | None
+
+
+class ForecastUsed(BaseModel):
+    selected: str
+    carbon_arm: str | None
+    price_arm: str | None
+
+
+class NightComparison(BaseModel):
+    night: date = Field(description="The evening the car plugs in; it must be ready the next morning.")
+    scenario: ScenarioInfo
+    window_start_local: datetime
+    window_end_local: datetime
+    window_slots: int = Field(description="Half-hours available. 26 normally, 24 or 28 on a night with a clock change.")
+    objective: Literal["carbon", "cost", "blend"]
+    objective_unit: str
+    carbon_price_gbp_per_tonne: float | None
+    forecast: ForecastUsed
+    outcomes: list[StrategyOutcome] = Field(description="arrival, timer, forecast_optimised, perfect_foresight, in that order.")
+    gap_captured_this_night: float | None = Field(
+        description="(timer - forecast_optimised) / (timer - perfect_foresight) for this one night; null when the timer was already optimal.")
+    notes: list[str] = Field(default_factory=list)
+    provenance: Provenance
+
+
+class MetricRow(BaseModel):
+    target: str | None = Field(default=None, description="carbon, price or charging: what the arm is being measured on.")
+    arm: str
+    vs_arm: str | None = Field(default=None, description="For paired comparisons: the arm this one is compared against.")
+    group_key: str
+    group_value: str
+    metric: str
+    value: float
+    ci_low: float | None = Field(default=None, description="Lower end of a 95% interval, where one exists.")
+    ci_high: float | None = None
+    n: int | None = Field(default=None, description="Sample size, in n_unit.")
+    n_unit: str | None = Field(default=None, description="half_hours or nights.")
+    unit: str
+
+
+class Caveat(BaseModel):
+    issue_id: str
+    title: str
+
+
+class MetricResult(BaseModel):
+    question_class: str
+    filters_applied: dict[str, str | list[str]] = Field(description="The filters actually used, including defaults the server applied.")
+    rows: list[MetricRow]
+    total_rows: int = Field(description="Rows matching before the limit was applied.")
+    truncated: bool
+    sample_sizes: dict[str, list[int]] = Field(description="Distinct sample sizes by unit. Differing sizes mean arms were scored on different samples.")
+    caveats: list[Caveat] = Field(description="Known data issues that affect how to read these numbers.")
+    notes: list[str] = Field(default_factory=list)
+    provenance: Provenance
+
+
+class DataIssue(BaseModel):
+    id: str
+    source: str
+    title: str
+    flagged: bool = Field(description="True for issues the log marks as especially important.")
+    status: str | None = None
+    handling: str | None = Field(default=None, description="How the pipeline deals with it. Only with detail='full'.")
+    body: str | None = Field(default=None, description="The full log entry. Only with detail='full'.")
+
+
+class IssueList(BaseModel):
+    count: int
+    total_matching: int
+    issues: list[DataIssue]
+    detail_returned: Literal["summary", "full"]
+    by_source: dict[str, int] = Field(description="Matching issues per source.")
+    notes: list[str] = Field(default_factory=list)
+    provenance: Provenance

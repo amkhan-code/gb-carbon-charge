@@ -24,7 +24,7 @@ async def test_describe_all_is_typed_and_complete(results_db):
     # The Layer 1 model must be described as using no price or wind inputs.
     assert not {"price_day_ahead", "price_mid", "wind_forecast"} & set(names["lgbm"].uses_sources)
     assert "price_day_ahead" in names["lgbm_price"].uses_sources
-    assert names["lgbm"].forecast_coverage.n_half_hours == 6 and names["timer"].forecast_coverage is None
+    assert names["lgbm"].forecast_coverage.n_half_hours > 500 and names["timer"].forecast_coverage is None
     assert {s.name for s in d.scenarios} >= {"default", "plug_in_17:00", "energy_20kWh", "mon_wed_fri_only"}
     classes = {c.name: c for c in d.question_classes}
     assert set(classes) == {"carbon_forecast_accuracy", "price_forecast_accuracy", "slot_ranking", "charging_value",

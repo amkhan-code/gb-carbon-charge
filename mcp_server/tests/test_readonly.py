@@ -55,7 +55,12 @@ async def test_no_tool_takes_sql_or_any_free_text_that_could_become_a_query(resu
 
 
 def test_every_statement_is_fixed_text_with_no_interpolation_or_stacked_statements():
-    stmts = {k: v for k, v in vars(queries).items() if k.isupper() and isinstance(v, str)}
+    stmts = {}
+    for k, v in vars(queries).items():
+        if k.isupper() and isinstance(v, str):
+            stmts[k] = v
+        elif k.isupper() and isinstance(v, dict):
+            stmts.update({f"{k}[{kk}]": vv for kk, vv in v.items()})
     assert len(stmts) >= 8
     for name, sql in stmts.items():
         assert not re.search(r"[{}%]|;\s*\S", sql), name  # no format placeholders, no second statement
@@ -68,8 +73,14 @@ def test_the_server_imports_only_what_it_is_allowed_to_from_the_pipeline():
     seen = set()
     for f in SRC.rglob("*.py"):
         for node in ast.walk(ast.parse(f.read_text())):
-            names = [a.name for a in node.names] if isinstance(node, ast.Import) else \
-                    [node.module] if isinstance(node, ast.ImportFrom) and node.module else []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                # `from carbon_charge.charging import blend` really imports the module carbon_charge.charging.blend.
+                names = [f"{node.module}.{a.name}" for a in node.names] if node.module in ("carbon_charge", "carbon_charge.charging") \
+                    else [node.module]
+            else:
+                continue
             seen |= {n for n in names if n.split(".")[0] == "carbon_charge"}
     assert seen <= allowed, f"forbidden imports from the pipeline: {sorted(seen - allowed)}"
     # Spelled out: the server never reaches ingestion, model training, evaluation, features or the writer.

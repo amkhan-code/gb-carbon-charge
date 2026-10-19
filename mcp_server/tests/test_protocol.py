@@ -13,7 +13,27 @@ pytestmark = pytest.mark.anyio
 async def test_tool_list_is_the_published_contract(results_db):
     async with Client(create_server(results_db)) as c:
         tools = {t.name: t for t in (await c.list_tools()).tools}
-        assert set(tools) == {"describe_dataset"}
+        assert set(tools) == {"describe_dataset", "get_forecast", "compare_strategies", "query_metrics", "list_data_issues"}
+        g = tools["get_forecast"]
+        props = g.input_schema["properties"]
+        assert list(props) == ["date", "target", "models", "detail"] and g.input_schema["required"] == ["date"]
+        assert props["date"]["format"] == "date" and props["target"]["enum"] == ["carbon", "price"]
+        assert props["detail"]["default"] == "summary" and "no live forecast" in g.description
+        assert {"scores", "unavailable_models", "periods_in_day", "provenance"} <= set(g.output_schema["properties"])
+        cs = tools["compare_strategies"]
+        cp = cs.input_schema["properties"]
+        assert list(cp) == ["night", "scenario", "objective", "carbon_price_gbp_per_tonne", "forecast"] and cs.input_schema["required"] == ["night"]
+        assert cp["objective"]["enum"] == ["carbon", "cost", "blend"] and cp["scenario"]["default"] == "default"
+        assert cs.annotations.read_only_hint is True and "perfect foresight" in cs.description
+        assert {"outcomes", "gap_captured_this_night", "window_slots"} <= set(cs.output_schema["properties"])
+        qm = tools["query_metrics"]
+        assert qm.input_schema["required"] == ["question_class"] and qm.input_schema["properties"]["limit"]["maximum"] == 500
+        assert qm.input_schema["properties"]["question_class"]["enum"] == [
+            "carbon_forecast_accuracy", "price_forecast_accuracy", "slot_ranking", "charging_value", "cost_carbon_tradeoff", "experiments"]
+        ld = tools["list_data_issues"]
+        assert ld.input_schema.get("required", []) == [] and "weather" in str(ld.input_schema["properties"]["source"])
+        assert all(t.annotations.read_only_hint and t.annotations.idempotent_hint for t in tools.values())
+        assert all(t.output_schema for t in tools.values())              # every tool publishes a typed output schema
         t = tools["describe_dataset"]
         assert list(t.input_schema["properties"]) == ["section"]  # flat: no wrapper object around the arguments
         assert t.input_schema["properties"]["section"]["enum"] == ["overview", "arms", "scenarios", "question_classes", "limitations", "all"]
