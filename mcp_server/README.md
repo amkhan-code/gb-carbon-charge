@@ -366,6 +366,29 @@ or the project, never to an edit of a transcript. The earlier runs of question 1
 Question 1 above is from the latest server. Questions 2 to 4 were run on the server before the last change (which adds
 a sentence of effect to each caveat) and were not rerun. The agent's words are never edited.
 
+### Run log: every run, including the ones not shown
+
+Showing one run per question is a selection, so this is what I found in all of them. Nothing is edited. The runs shown
+above are the first complete set I reviewed; a second complete set, run on the latest server, is in
+[`transcripts/archive/rerun-2/`](transcripts/archive/rerun-2/).
+
+| Question | Run | Shown? | What I found |
+|---|---|---|---|
+| 1 model vs baseline | 1 (before any fix) | archived | Numbers right. Invented "roughly 3+ years" (it is 21 months); called the gap "significant" from sample size alone. |
+| 1 | 2 | archived | Read caveat X-2 backwards ("flatters the baseline"); the log had no stated effect. |
+| 1 | 3 | **shown** | Direction of X-2 right, intervals caveat respected, points to `charging_value`. Calls the effect "slight"; its size is unknown. |
+| 1 | 4 (rerun-2) | archived | Numbers right, and it went further: pulled the per-night intervals from `charging_value`, all correct. But read X-2 backwards again, saying a weaker baseline "makes the comparison more favourable to the baseline", the opposite of the effect line it was shown. |
+| 2 date outside window | 2 runs | one shown, one archived | Both handled the structured error correctly and did not substitute another date. |
+| 3 clock-change night | shown | **shown** | Every slot, time and figure right, including the BST-to-GMT changeover. |
+| 3 | rerun-2 | archived | Figures right, but says the forecast plan's first slot is "the repeated 01:00 hour after clocks went back". It is the first 01:00 (BST); the repeated hour comes an hour later in UTC. |
+| 4 wind experiment | 2 runs | one shown, one archived | Both reach the right conclusion and recover from a wrong `eval_window` via the structured error. The rerun calls the development window "contaminated", which overstates it. |
+
+What this says about the tool: it fixed the gaps that were mine (missing period, missing interval warning, missing
+effect) and the agent's answers improved. What remains is the agent misreading a subtle directional caveat in about
+half the runs, even when the effect is spelled out. A tool can state facts clearly and give structured recovery paths;
+it cannot make an agent read them. The place to fix the rest would be the agent's prompt or a structured field such
+as `direction: favours_model`, not more prose in the tool.
+
 ## Limits
 
 - **stdio only.** No HTTP transport and no authentication; it is meant to run as a local subprocess of the client.
