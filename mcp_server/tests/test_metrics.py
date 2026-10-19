@@ -43,6 +43,9 @@ async def test_carbon_accuracy_equals_the_report_csv(results_db):
         assert val(res, arm, "mae").n == csv.loc[arm, "n"] and val(res, arm, "mae").unit == "gCO2/kWh"
     assert res.sample_sizes == {"half_hours": [int(csv["n"].iloc[0])]}         # every arm scored on the same half-hours
     assert res.filters_applied == {"group_by": "overall"} and not res.truncated
+    # The period and the missing intervals are stated, so an agent need not guess either.
+    assert res.evaluation_period == "2025-01-01 to 2026-09-29: 637 days (about 21 months)"
+    assert any("no confidence intervals" in n and "not independent" in n and "charging_value" in n for n in res.notes)
     assert {c.issue_id for c in res.caveats} >= {"X-2", "X-5"} and all(c.title for c in res.caveats)
     assert res.provenance.out_of_sample
 
@@ -194,3 +197,23 @@ async def test_no_result_class_returns_two_rows_for_the_same_key(results_db):
                 res = MetricResult.model_validate((await c.call_tool("query_metrics", {"question_class": qc, "group_by": group, "limit": 500})).structured_content)
                 keys = [(r.arm, r.vs_arm, r.metric, r.group_value) for r in res.rows]
                 assert len(keys) == len(set(keys)), (qc, group)
+
+
+async def test_the_evaluation_period_is_right_for_every_class_including_experiment_windows(results_db):
+    async with Client(create_server(results_db)) as c:
+        async def period(args):
+            r = await c.call_tool("query_metrics", {"limit": 5, **args})
+            return MetricResult.model_validate(r.structured_content).evaluation_period
+        assert await period({"question_class": "charging_value"}) == "2025-01-01 to 2026-09-29: 637 days (about 21 months)"
+        assert await period({"question_class": "experiments", "eval_window": "2024-07-01_2024-12-31"}) == \
+            "2024-07-01 to 2024-12-31: 184 days (about 6 months)"
+        assert await period({"question_class": "experiments"}) == "2025-01-01 to 2026-09-29: 637 days (about 21 months)"
+
+
+async def test_interval_caveat_appears_only_where_intervals_are_missing(results_db):
+    for qc, expect in (("carbon_forecast_accuracy", True), ("price_forecast_accuracy", True), ("slot_ranking", True),
+                       ("charging_value", False), ("cost_carbon_tradeoff", False), ("experiments", False)):
+        res = ok(await call(results_db, {"question_class": qc, "limit": 5}))
+        assert any("no confidence intervals" in n for n in res.notes) == expect, qc
+    ranking = ok(await call(results_db, {"question_class": "slot_ranking"}))
+    assert not any("not independent" in n for n in ranking.notes)  # nights are the unit there; the half-hour caution does not apply

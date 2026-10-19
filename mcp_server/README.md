@@ -136,6 +136,17 @@ _Not generated yet. Run `uv run python mcp_server/scripts/run_transcripts.py --e
 questions (using only this server), saves the raw event streams and puts the readable transcripts here._
 <!-- TRANSCRIPTS:END -->
 
+### What the transcripts changed
+
+The first run of the first question (kept unedited in [`transcripts/archive/`](transcripts/archive/)) had two flaws
+in the agent's answer. It said the data covered "roughly 3+ years", when 30,564 half-hours is 21 months, and it
+called a difference "statistically significant" on the strength of the sample size alone, although those accuracy
+rows carry no confidence intervals and half-hours within a night are not independent. Both traced to information the
+tool had not given, so I fixed the tool rather than the transcript: `query_metrics` now states the evaluation period
+and how long it is, and says plainly when a result class has no intervals and where to find them
+(`charging_value`, scored per night). The transcripts above are from a rerun after that change; the agent's words are
+never edited. The other three first-run answers matched the data and are unchanged in substance.
+
 ## Limits
 
 - **stdio only.** No HTTP transport and no authentication; it is meant to run as a local subprocess of the client.

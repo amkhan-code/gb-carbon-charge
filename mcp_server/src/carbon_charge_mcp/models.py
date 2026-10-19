@@ -187,6 +187,8 @@ class Caveat(BaseModel):
 
 class MetricResult(BaseModel):
     question_class: str
+    evaluation_period: str | None = Field(
+        default=None, description="The days these results cover, and how long that is, so sample sizes can be put in context.")
     filters_applied: dict[str, str | list[str]] = Field(description="The filters actually used, including defaults the server applied.")
     rows: list[MetricRow]
     total_rows: int = Field(description="Rows matching before the limit was applied.")

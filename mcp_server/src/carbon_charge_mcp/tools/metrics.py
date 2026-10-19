@@ -2,11 +2,12 @@
 
 from typing import Annotated, Literal
 
+import pandas as pd
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from carbon_charge_mcp import queries
-from carbon_charge_mcp.context import meta, provenance, resolve_names
+from carbon_charge_mcp.context import as_date, meta, provenance, resolve_names, window
 from carbon_charge_mcp.db import ResultsDb
 from carbon_charge_mcp.errors import FIELD_HINTS, failure, guard, suggest
 from carbon_charge_mcp.models import Caveat, MetricResult, MetricRow
@@ -17,6 +18,17 @@ QuestionClass = Literal["carbon_forecast_accuracy", "price_forecast_accuracy", "
 FIELD_HINTS["question_class"] = "Pick one of: " + ", ".join(QUESTION_CLASS_TEXT) + ". describe_dataset (section='question_classes') explains each."
 FIELD_HINTS["limit"] = "An integer from 1 to 500."
 SCENARIO_CLASSES = ("charging_value", "cost_carbon_tradeoff")
+NO_INTERVALS = {
+    "carbon_forecast_accuracy": "half-hours",
+    "price_forecast_accuracy": "half-hours",
+    "slot_ranking": "nights",
+}
+
+
+def _period(first, last) -> str:
+    days = (last - first).days + 1
+    months = round(days / 30.4)
+    return f"{first} to {last}: {days} days (about {months} months)"
 
 
 def register(mcp, db: ResultsDb) -> None:
@@ -93,6 +105,12 @@ def register(mcp, db: ResultsDb) -> None:
         rows = rows[:limit]
         if not rows and not notes:
             notes.append("No rows matched these filters. Try omitting arms, metrics or the other filters.")
+        if qc in NO_INTERVALS:
+            notes.append("These rows have no confidence intervals. " + (
+                "Half-hours within a night are not independent, so the sample size overstates precision. "
+                if NO_INTERVALS[qc] == "half-hours" else "") +
+                "For intervals on how much a forecast improves charging outcomes, use question_class='charging_value', "
+                "which is scored per night.")
         if group == "reference_sample":
             notes.append("reference_sample scores arms on the half-hours where the NESO latest-revision field exists. That field is "
                          "NOT a day-ahead forecast (CI-1), so it is a reference, not a baseline.")
@@ -112,7 +130,13 @@ def register(mcp, db: ResultsDb) -> None:
                      ("arms", wanted), ("metrics", metrics)):
             if v:
                 filters[k] = v
+        if qc == "experiments" and eff_window and "_" in eff_window:
+            a, b = eff_window.split("_", 1)
+            period = _period(pd.Timestamp(a).date(), pd.Timestamp(b).date())
+        else:
+            first, last = window(m)
+            period = _period(as_date(first), as_date(last))
         return MetricResult(
-            question_class=qc, filters_applied=filters, truncated=total > limit, total_rows=total,
+            question_class=qc, evaluation_period=period, filters_applied=filters, truncated=total > limit, total_rows=total,
             rows=[MetricRow(**r) for r in rows], sample_sizes={k: sorted(v) for k, v in sizes.items()}, notes=notes,
             caveats=[Caveat(issue_id=i, title=titles[i]) for i in CLASS_CAVEATS.get(qc, []) if i in titles], provenance=provenance(m))
