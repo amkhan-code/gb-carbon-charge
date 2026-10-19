@@ -87,5 +87,6 @@ def register(mcp, db: ResultsDb) -> None:
             count=len(shown), total_matching=total, detail_returned=returned, by_source=by_source, notes=notes,
             issues=[DataIssue(id=r["id"], source=r["source"], title=r["title"], flagged=bool(r["flagged"]),
                               status=(r["status"] or None) if full else _short(r["status"]),
-                              handling=(r["handling"] or None) if full else None, body=(r["body"] or None) if full else None)
+                              handling=(r["handling"] or None) if full else None, body=(r["body"] or None) if full else None,
+                              effect=(r["effect"] or None) if full else None)
                     for r in shown], provenance=provenance(m))

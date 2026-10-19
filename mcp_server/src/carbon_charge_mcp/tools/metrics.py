@@ -7,7 +7,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from carbon_charge_mcp import queries
-from carbon_charge_mcp.context import as_date, meta, provenance, resolve_names, window
+from carbon_charge_mcp.context import as_date, meta, provenance, resolve_names, sentence_short, window
 from carbon_charge_mcp.db import ResultsDb
 from carbon_charge_mcp.errors import FIELD_HINTS, failure, guard, suggest
 from carbon_charge_mcp.models import Caveat, MetricResult, MetricRow
@@ -124,7 +124,7 @@ def register(mcp, db: ResultsDb) -> None:
                     sizes[r["n_unit"]].append(int(r["n"]))
         if any(len(v) > 1 for v in sizes.values()):
             notes.append("These rows have different sample sizes, so the arms were not all scored on the same sample; compare with care.")
-        titles = {r["id"]: r["title"] for r in db.rows(queries.ISSUE_TITLES)}
+        issues = {r["id"]: r for r in db.rows(queries.ISSUE_TITLES)}
         filters = {"group_by": group}
         for k, v in (("scenario", eff_scenario), ("objective", eff_objective), ("eval_window", eff_window),
                      ("arms", wanted), ("metrics", metrics)):
@@ -139,4 +139,5 @@ def register(mcp, db: ResultsDb) -> None:
         return MetricResult(
             question_class=qc, evaluation_period=period, filters_applied=filters, truncated=total > limit, total_rows=total,
             rows=[MetricRow(**r) for r in rows], sample_sizes={k: sorted(v) for k, v in sizes.items()}, notes=notes,
-            caveats=[Caveat(issue_id=i, title=titles[i]) for i in CLASS_CAVEATS.get(qc, []) if i in titles], provenance=provenance(m))
+            caveats=[Caveat(issue_id=i, title=issues[i]["title"], effect=sentence_short(issues[i]["effect"] or issues[i]["handling"]))
+                     for i in CLASS_CAVEATS.get(qc, []) if i in issues], provenance=provenance(m))

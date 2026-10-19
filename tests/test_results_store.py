@@ -21,6 +21,8 @@ def test_parse_edge_cases():
   it wraps over lines.
 - Handling: stored as `x`; never
   used as a feature.
+- Effect: conservative
+  and small.
 - Status: open
 ### X-9: no bullets at all
 Just prose here.
@@ -32,7 +34,8 @@ Just prose here.
     assert list(df.index) == ["CI-1", "X-9", "ZZ-1"]
     assert df.loc["CI-1", "flagged"] and df.loc["CI-1", "title"] == "the thing is NOT right"
     assert df.loc["CI-1", "handling"] == "stored as `x`; never used as a feature."  # continuation lines joined
-    assert df.loc["CI-1", "status"] == "open"
+    assert df.loc["CI-1", "status"] == "open" and df.loc["CI-1", "effect"] == "conservative and small."
+    assert pd.isna(df.loc["X-9", "effect"])
     assert df.loc["CI-1", "source"] == "carbon_intensity" and df.loc["X-9", "source"] == "cross_source"
     assert df.loc["ZZ-1", "source"] == "other"
     assert pd.isna(df.loc["X-9", "handling"]) and df.loc["X-9", "body"] == "Just prose here."
@@ -46,6 +49,8 @@ def test_real_data_issues_file_parses_completely():
     assert {"CI-1", "DEM-3", "WX-3", "X-5", "PX-1", "WIND-1", "WIND-6", "ENV-1"} <= set(df["id"])
     assert set(df["source"]) <= set(results_store.ISSUE_SOURCES.values())
     assert df.set_index("id").loc["CI-1", "flagged"]
+    effects = df.set_index("id")["effect"]
+    assert "favour the model" in effects["X-2"] and "conservative" in effects["X-5"]  # consequences are written down, not left to titles
     assert not df["title"].str.contains("FLAGGED").any()
 
 

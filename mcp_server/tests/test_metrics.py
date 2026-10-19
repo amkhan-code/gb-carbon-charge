@@ -217,3 +217,24 @@ async def test_interval_caveat_appears_only_where_intervals_are_missing(results_
         assert any("no confidence intervals" in n for n in res.notes) == expect, qc
     ranking = ok(await call(results_db, {"question_class": "slot_ranking"}))
     assert not any("not independent" in n for n in ranking.notes)  # nights are the unit there; the half-hour caution does not apply
+
+
+async def test_caveats_say_what_they_mean_for_the_numbers_not_just_their_titles(results_db):
+    res = ok(await call(results_db, {"question_class": "carbon_forecast_accuracy", "limit": 5}))
+    c = {x.issue_id: x for x in res.caveats}
+    # "yesterday cannot be a strict baseline" is ambiguous on its own; the effect removes the ambiguity.
+    assert "favour the model" in c["X-2"].effect and "weaker" in c["X-2"].effect
+    assert all(x.effect for x in res.caveats)
+    assert all(len(x.effect) <= 270 and not x.effect.endswith(",") for x in res.caveats)
+
+
+def test_sentence_short_never_cuts_mid_sentence():
+    from carbon_charge_mcp.context import sentence_short
+    first = "This baseline is weaker than a true same-period-yesterday, so comparisons favour the model."
+    text = first + " " + "More detail follows here. " * 20
+    out = sentence_short(text, 150)
+    assert text.startswith(out) and out.endswith(".") and len(out) <= 150   # whole sentences only, within the limit
+    assert out.startswith(first) and not out.endswith("here. More")        # keeps as many whole sentences as fit
+    stub = sentence_short("Short. " + "word " * 80, 100)           # a stub of a sentence is not worth returning
+    assert stub.endswith("...") and len(stub) <= 104
+    assert sentence_short("short", 120) == "short" and sentence_short(None) is None

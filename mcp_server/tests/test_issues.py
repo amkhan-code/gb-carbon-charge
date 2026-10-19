@@ -88,3 +88,9 @@ async def test_malformed_arguments_are_structured(results_db, args):
     assert p.error_code == "INVALID_ARGUMENT" and p.problems
     if "source" in args:
         assert "weather" in p.did_you_mean and "prices" in p.allowed_values and p.hint == "Choose one of the allowed values."
+
+
+async def test_full_detail_includes_the_stated_effect(results_db):
+    (i,) = ok(await call(results_db, {"id": "X-2", "detail": "full"})).issues
+    assert i.effect and "favour the model" in i.effect
+    assert ok(await call(results_db, {"id": "X-2"})).issues[0].effect is None   # summaries stay short

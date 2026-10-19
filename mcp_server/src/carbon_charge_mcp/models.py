@@ -183,6 +183,7 @@ class MetricRow(BaseModel):
 class Caveat(BaseModel):
     issue_id: str
     title: str
+    effect: str | None = Field(default=None, description="What it means for how to read these results (the issue's stated effect, or how it is handled).")
 
 
 class MetricResult(BaseModel):
@@ -206,6 +207,7 @@ class DataIssue(BaseModel):
     flagged: bool = Field(description="True for issues the log marks as especially important.")
     status: str | None = None
     handling: str | None = Field(default=None, description="How the pipeline deals with it. Only with detail='full'.")
+    effect: str | None = Field(default=None, description="What it means for reading results. Only with detail='full'.")
     body: str | None = Field(default=None, description="The full log entry. Only with detail='full'.")
 
 

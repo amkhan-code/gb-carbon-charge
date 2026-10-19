@@ -63,5 +63,5 @@ METRIC_ROWS = (
 )
 CLASS_METRICS = "SELECT DISTINCT metric FROM results_metrics WHERE question_class = ? ORDER BY metric"
 EVAL_WINDOWS = "SELECT DISTINCT eval_window FROM results_metrics WHERE eval_window IS NOT NULL ORDER BY eval_window"
-ISSUES = "SELECT id, source, title, flagged, handling, status, body FROM data_issues"
-ISSUE_TITLES = "SELECT id, title FROM data_issues"
+ISSUES = "SELECT id, source, title, flagged, handling, effect, status, body FROM data_issues"
+ISSUE_TITLES = "SELECT id, title, effect, handling FROM data_issues"

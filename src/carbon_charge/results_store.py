@@ -180,9 +180,9 @@ def parse_data_issues(text: str) -> pd.DataFrame:
         flagged = "FLAGGED" in title
         title = re.sub(r"\s*[—-]+\s*FLAGGED\s*$", "", title).strip()
         rows.append({"id": it["id"], "source": ISSUE_SOURCES.get(it["id"].split("-")[0], "other"), "title": title,
-                     "flagged": flagged, "handling": pick("Handling"), "status": pick("Status"),
+                     "flagged": flagged, "handling": pick("Handling"), "effect": pick("Effect"), "status": pick("Status"),
                      "body": re.sub(r"[ \t]+\n", "\n", body)})
-    return pd.DataFrame(rows, columns=["id", "source", "title", "flagged", "handling", "status", "body"])
+    return pd.DataFrame(rows, columns=["id", "source", "title", "flagged", "handling", "effect", "status", "body"])
 
 
 # --- persistence ---------------------------------------------------------------

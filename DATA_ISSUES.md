@@ -110,6 +110,9 @@ Source: "Day Ahead Half Hourly Demand Forecast Performance". Chosen because it h
   otherwise (`models/baselines.py`). This is a deliberate reading of the spec, not a data
   fault; a naive "D-1 regardless" baseline would leak and is not computed.
 
+- Effect: this baseline is weaker than a true same-period-yesterday, which no forecaster could use at 11:00. Comparisons
+  against it therefore favour the model; they are not unfair to it. It obeys the cutoff and never looks at the target day.
+
 ### X-3: NESO forecast baseline has no history yet
 - Because of CI-1, the only valid NESO baseline is the logger's, which began 2026-09-30. The
   first snapshots taken locally that day were issued after that day's cutoff, so they qualify

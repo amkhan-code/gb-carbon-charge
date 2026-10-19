@@ -41,6 +41,17 @@ def check_in_window(day: date, m: dict, *, field: str, last_override: date | Non
         hint="Call describe_dataset (section='overview') for the window. Retry with a date inside it.")
 
 
+def sentence_short(text: str | None, limit: int = 260) -> str | None:
+    """Shorten at a sentence boundary, never mid-sentence."""
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind(". "), cut.rfind("; "))
+    return (cut[: end + 1] if end > 60 else cut.rsplit(" ", 1)[0] + " ...").strip()
+
+
 def resolve_names(requested: list[str], valid: list[str], *, field: str, noun: str = "name") -> list[str]:
     """Validate names against the real vocabulary; unknown ones get suggestions, never a guess."""
     seen = list(dict.fromkeys(requested))
