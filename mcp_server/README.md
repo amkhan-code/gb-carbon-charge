@@ -370,7 +370,8 @@ a sentence of effect to each caveat) and were not rerun. The agent's words are n
 
 Showing one run per question is a selection, so this is what I found in all of them. Nothing is edited. The runs shown
 above are the first complete set I reviewed; a second complete set, run on the latest server, is in
-[`transcripts/archive/rerun-2/`](transcripts/archive/rerun-2/).
+[`transcripts/archive/rerun-2/`](transcripts/archive/rerun-2/), and a third run of question 4 is in
+[`transcripts/archive/rerun-3/`](transcripts/archive/rerun-3/).
 
 | Question | Run | Shown? | What I found |
 |---|---|---|---|
@@ -381,7 +382,7 @@ above are the first complete set I reviewed; a second complete set, run on the l
 | 2 date outside window | 2 runs | one shown, one archived | Both handled the structured error correctly and did not substitute another date. |
 | 3 clock-change night | shown | **shown** | Every slot, time and figure right, including the BST-to-GMT changeover. |
 | 3 | rerun-2 | archived | Figures right, but says the forecast plan's first slot is "the repeated 01:00 hour after clocks went back". It is the first 01:00 (BST); the repeated hour comes an hour later in UTC. |
-| 4 wind experiment | 2 runs | one shown, one archived | Both reach the right conclusion and recover from a wrong `eval_window` via the structured error. The rerun calls the development window "contaminated", which overstates it. |
+| 4 wind experiment | 3 runs | one shown, two archived | All three reach the right conclusion and recover from a wrong `eval_window` via the structured error. Rerun-2 calls the development window "contaminated", which overstates it. Rerun-3 says NESO's file was "back-filled for 2024", which is reversed: back-filled forecasts are the unusable ones, and 2024 has good coverage because those forecasts were issued the day before. |
 
 What this says about the tool: it fixed the gaps that were mine (missing period, missing interval warning, missing
 effect) and the agent's answers improved. What remains is the agent misreading a subtle directional caveat in about
