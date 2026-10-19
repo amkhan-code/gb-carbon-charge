@@ -44,6 +44,19 @@ def run_one(question: str, db: Path, repo: Path, timeout: int = 420) -> list[dic
     return events
 
 
+def check_run(events: list[dict]) -> None:
+    """Refuse to keep a run that is not a genuine agent answer obtained through the server."""
+    result = next((e for e in reversed(events) if e.get("type") == "result"), None)
+    if result is None:
+        raise RuntimeError("the run produced no result event")
+    if result.get("is_error"):
+        raise RuntimeError(f"the run failed: {str(result.get('result'))[:200]}")
+    used_server = any(b.get("type") == "tool_use" and b.get("name", "").startswith(f"mcp__{SERVER}__")
+                      for e in events if e.get("type") == "assistant" for b in blocks(e))
+    if not used_server:
+        raise RuntimeError("the agent never called a tool on the server, so this is not an answer obtained through it")
+
+
 def blocks(msg: dict):
     c = msg.get("message", {}).get("content", [])
     return [{"type": "text", "text": c}] if isinstance(c, str) else c
@@ -100,6 +113,7 @@ def main() -> None:
     args = ap.parse_args()
     repo, out = Path.cwd().resolve(), Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    failed: list[str] = []
     if args.embed_only:
         embed(out, Path("mcp_server/README.md"))
         return
@@ -108,11 +122,22 @@ def main() -> None:
             continue
         print(f"running {slug} ...", flush=True)
         events = run_one(question, Path(args.db).resolve(), repo)
+        try:
+            check_run(events)
+        except RuntimeError as exc:
+            print(f"  SKIPPED, nothing saved: {exc}")
+            failed.append(slug)
+            continue
         (out / f"{slug}.jsonl").write_text("\n".join(sanitise(json.dumps(e), repo) for e in events) + "\n")
         clean = [json.loads(sanitise(json.dumps(e), repo)) for e in events]
         (out / f"{slug}.md").write_text(sanitise(render(question, clean), repo))
         init = next((e for e in clean if e.get("subtype") == "init"), {})
         print(f"  tools visible to the agent: {sorted(t for t in init.get('tools', []))}")
+    if failed:
+        # Never embed a partial or empty set as if it were the real thing.
+        raise SystemExit(f"{len(failed)} of {len(QUESTIONS if not args.only else [q for q in QUESTIONS if q[0].startswith(args.only)])} "
+                         f"runs failed ({', '.join(failed)}); nothing was embedded. If the error is a 401, log in again with "
+                         f"`claude auth login` in a normal terminal window and rerun.")
     if args.embed:
         embed(out, Path("mcp_server/README.md"))
 
