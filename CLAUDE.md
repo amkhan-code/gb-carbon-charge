@@ -119,3 +119,14 @@ the charging optimiser reports cost-only, carbon-only and a weighted trade-off.
   from `log-wind` / `.github/workflows/log-wind-forecast.yml`.
 - The night-deviation target (`ci_night`) predicts each slot's deviation from its 18:00-07:00 night mean
   and adds the base model's night level back, so forecasts remain valid absolute values.
+
+## MCP server (`mcp_server/`)
+
+- A read-only MCP server over the results in DuckDB, as a uv workspace package. Five typed tools; no tool takes SQL.
+  The pipeline writes the tidy results tables (`carbon-charge export-results`); the server only reads them.
+- The server may import only `carbon_charge.timeutils`, `config` and the pure `charging` modules (a test enforces it).
+  It must never import ingestion, models, evaluation, features or the results writer.
+- Every failure is a structured `ErrorPayload`; unexpected exceptions are contained and never echoed to the agent.
+  Keep answers small by default (summaries first, detail on request).
+- Pin the SDK minor version: the middleware used to reshape validation errors is provisional in 2.x.
+- Transcripts in its README must be real runs (`scripts/run_transcripts.py`), never written by hand.
